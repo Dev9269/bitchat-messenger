@@ -1,5 +1,6 @@
 package com.bitchat.mesh
 
+import android.annotation.SuppressLint
 import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.os.ParcelUuid
@@ -25,6 +26,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.security.MessageDigest
 
+@SuppressLint("StaticFieldLeak")
 object MeshManager {
 
     private interface PacketChannel {

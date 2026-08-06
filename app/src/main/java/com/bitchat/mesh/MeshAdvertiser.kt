@@ -1,5 +1,6 @@
 package com.bitchat.mesh
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.AdvertiseCallback
@@ -9,6 +10,7 @@ import android.bluetooth.le.BluetoothLeAdvertiser
 import android.content.Context
 import android.os.ParcelUuid
 
+@SuppressLint("MissingPermission")
 class MeshAdvertiser(context: Context) {
 
     private val bluetoothManager = context.getSystemService(BluetoothManager::class.java)

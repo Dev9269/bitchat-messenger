@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 
+@SuppressLint("MissingPermission")
 class MeshLink(
     private val context: Context,
     val nodeId: String,
@@ -106,7 +107,11 @@ class MeshLink(
     override fun onConnectionStateChange(gatt: BluetoothGatt?, status: Int, newState: Int) {
         when (newState) {
             BluetoothProfile.STATE_CONNECTED -> {
-                gatt?.discoverServices()
+                try {
+                    gatt?.discoverServices()
+                } catch (_: Exception) {
+                    failClosed()
+                }
             }
             BluetoothProfile.STATE_DISCONNECTED -> {
                 failClosed()
@@ -144,7 +149,12 @@ class MeshLink(
             failClosed()
             return
         }
-        g.setCharacteristicNotification(rx, true)
+        try {
+            g.setCharacteristicNotification(rx, true)
+        } catch (_: Exception) {
+            failClosed()
+            return
+        }
         try {
             if (Build.VERSION.SDK_INT >= 33) {
                 g.writeDescriptor(cccd, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)

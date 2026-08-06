@@ -1,5 +1,6 @@
 package com.bitchat.mesh
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
@@ -7,11 +8,11 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
 
+@SuppressLint("MissingPermission")
 class MeshScanner(context: Context) {
 
     private val bluetoothManager = context.getSystemService(BluetoothManager::class.java)

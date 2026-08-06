@@ -22,6 +22,7 @@ object GattConstants {
     val CLIENT_CHARACTERISTIC_CONFIG: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 }
 
+@SuppressLint("MissingPermission")
 class MeshGattServer(
     private val context: Context,
     private val onPacket: (ByteArray, String) -> Unit,
@@ -88,11 +89,11 @@ class MeshGattServer(
         if (!session.notifyEnabled) return false
         val rx = rxCharacteristic ?: return false
         return try {
-            if (Build.VERSION.SDK_INT >= 33) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 srv.notifyCharacteristicChanged(session.device, rx, false, bytes) ==
                     BluetoothStatusCodes.SUCCESS
             } else {
-                @Suppress("DEPRECATION")
+                @Suppress("DEPRECATION", "NewApi")
                 srv.notifyCharacteristicChanged(session.device, rx, false, bytes)
                 true
             }
@@ -123,13 +124,16 @@ class MeshGattServer(
             value: ByteArray,
         ) {
             if (responseNeeded) {
-                server?.sendResponse(
-                    device,
-                    requestId,
-                    if (preparedWrite) BluetoothGatt.GATT_FAILURE else BluetoothGatt.GATT_SUCCESS,
-                    0,
-                    null
-                )
+                try {
+                    server?.sendResponse(
+                        device,
+                        requestId,
+                        if (preparedWrite) BluetoothGatt.GATT_FAILURE else BluetoothGatt.GATT_SUCCESS,
+                        0,
+                        null
+                    )
+                } catch (_: Exception) {
+                }
             }
             if (!preparedWrite && value.isNotEmpty()) {
                 onPacket(value, device.address)
@@ -148,9 +152,15 @@ class MeshGattServer(
             if (descriptor.uuid == GattConstants.CLIENT_CHARACTERISTIC_CONFIG && value.isNotEmpty()) {
                 val enabled = (value[0].toInt() and 1) == 1
                 sessions[device.address]?.notifyEnabled = enabled
-                server?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                try {
+                    server?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                } catch (_: Exception) {
+                }
             } else {
-                server?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
+                try {
+                    server?.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, 0, null)
+                } catch (_: Exception) {
+                }
             }
         }
     }
