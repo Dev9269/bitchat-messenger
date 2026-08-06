@@ -18,6 +18,9 @@ interface PeerDao {
     @Query("SELECT * FROM peers")
     suspend fun all(): List<PeerEntity>
 
+    @Query("SELECT * FROM peers WHERE displayName = :name COLLATE NOCASE LIMIT 1")
+    suspend fun findByNameExact(name: String): PeerEntity?
+
     @Query("SELECT * FROM peers WHERE displayName LIKE '%' || :name || '%' COLLATE NOCASE")
     suspend fun searchByName(name: String): List<PeerEntity>
 

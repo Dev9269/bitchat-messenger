@@ -74,10 +74,12 @@ object MeshManager {
         refreshRuntimeState(context)
     }
 
-    fun setDisplayName(name: String) {
+    suspend fun setDisplayName(name: String): Boolean {
         val clean = name.trim().take(AdvertisePayload.MAX_NAME_BYTES)
-        val context = appContext ?: return
-        if (clean.isEmpty() || clean == displayName.value) return
+        val context = appContext ?: return false
+        if (clean.isEmpty() || clean == displayName.value) return false
+        val owner = DataGraph.repository.findPeerByNameExact(clean)
+        if (owner != null && owner.nodeId != nodeId.value) return false
         NodeIdentity.setDisplayName(context, clean)
         displayName.value = clean
         val adv = advertiser
@@ -98,6 +100,7 @@ object MeshManager {
                 }
             }
         }
+        return true
     }
 
     fun refreshRuntimeState(context: Context) {
@@ -355,6 +358,9 @@ object MeshManager {
                 map + (peerNodeId to map.getValue(peerNodeId).copy(lastSeen = now))
             }
             return
+        }
+        if (decoded.name != null && decoded.name.equals(displayName.value, ignoreCase = true)) {
+            statusError.value = "Someone else nearby is using your username \"${decoded.name}\""
         }
         _peers.update { map ->
             map + (peerNodeId to Peer(

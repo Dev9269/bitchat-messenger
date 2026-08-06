@@ -28,6 +28,9 @@ class DiscoveryViewModel : ViewModel() {
     private val _searchResults = MutableStateFlow<List<PeerEntity>>(emptyList())
     val searchResults: StateFlow<List<PeerEntity>> = _searchResults.asStateFlow()
 
+    private val _nameError = MutableStateFlow<String?>(null)
+    val nameError: StateFlow<String?> = _nameError.asStateFlow()
+
     val meshState: StateFlow<MeshUiState> = combine(
         MeshManager.bluetoothEnabled,
         MeshManager.permissionsGranted,
@@ -54,6 +57,14 @@ class DiscoveryViewModel : ViewModel() {
         }
         viewModelScope.launch {
             _searchResults.value = DataGraph.repository.searchPeersByName(q)
+        }
+    }
+
+    fun saveDisplayName(name: String) {
+        _nameError.value = null
+        viewModelScope.launch {
+            val ok = MeshManager.setDisplayName(name)
+            _nameError.value = if (ok) null else "Username taken. Pick another one."
         }
     }
 }

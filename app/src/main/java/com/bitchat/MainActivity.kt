@@ -88,13 +88,15 @@ class MainActivity : ComponentActivity() {
                 val meshState by discoveryViewModel.meshState.collectAsStateWithLifecycle()
                 val peers by MeshManager.peers.collectAsStateWithLifecycle()
                 val searchResults by discoveryViewModel.searchResults.collectAsStateWithLifecycle()
+                val nameError by discoveryViewModel.nameError.collectAsStateWithLifecycle()
                 DiscoveryScreen(
                     state = meshState,
                     peers = peers.values.toList(),
                     foundPeers = searchResults,
+                    nameError = nameError,
                     onSearchQuery = { discoveryViewModel.searchByName(it) },
                     onOpenFoundChat = { screen = Screen.Chat(it) },
-                    onSetDisplayName = { MeshManager.setDisplayName(it) },
+                    onSetDisplayName = { discoveryViewModel.saveDisplayName(it) },
                     onRequestPermissions = ::requestMissingPermissions,
                     onOpenBluetoothSettings = {
                         startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))

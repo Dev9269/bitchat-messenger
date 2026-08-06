@@ -62,6 +62,7 @@ fun DiscoveryScreen(
     state: MeshUiState,
     peers: List<Peer>,
     foundPeers: List<PeerEntity>,
+    nameError: String?,
     onSearchQuery: (String) -> Unit,
     onOpenFoundChat: (String) -> Unit,
     onSetDisplayName: (String) -> Unit,
@@ -114,7 +115,7 @@ fun DiscoveryScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                IdentityCard(state, onSetDisplayName)
+                IdentityCard(state, onSetDisplayName, nameError)
             }
             item {
                 OutlinedTextField(
@@ -216,7 +217,7 @@ fun DiscoveryScreen(
 }
 
 @Composable
-private fun IdentityCard(state: MeshUiState, onSetDisplayName: (String) -> Unit) {
+private fun IdentityCard(state: MeshUiState, onSetDisplayName: (String) -> Unit, nameError: String?) {
     var editing by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf(state.displayName) }
     Card {
@@ -249,17 +250,27 @@ private fun IdentityCard(state: MeshUiState, onSetDisplayName: (String) -> Unit)
                     value = draft,
                     onValueChange = { draft = it.take(AdvertisePayload.MAX_NAME_BYTES) },
                     singleLine = true,
+                    isError = nameError != null,
                     label = { Text("Username (max ${AdvertisePayload.MAX_NAME_BYTES} letters)") },
                 )
+                nameError?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 Button(
-                    onClick = {
-                        onSetDisplayName(draft)
-                        editing = false
-                    },
+                    onClick = { onSetDisplayName(draft) },
                     enabled = draft.isNotBlank(),
                 ) {
                     Text("Save username")
                 }
+                Text(
+                    "Usernames are unique: the first person to take a name keeps it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             Text(
                 "Node ID: ${state.nodeId.take(8)}…",
