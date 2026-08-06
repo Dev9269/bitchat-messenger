@@ -87,9 +87,14 @@ class MainActivity : ComponentActivity() {
                 val discoveryViewModel: DiscoveryViewModel = viewModel()
                 val meshState by discoveryViewModel.meshState.collectAsStateWithLifecycle()
                 val peers by MeshManager.peers.collectAsStateWithLifecycle()
+                val searchResults by discoveryViewModel.searchResults.collectAsStateWithLifecycle()
                 DiscoveryScreen(
                     state = meshState,
                     peers = peers.values.toList(),
+                    foundPeers = searchResults,
+                    onSearchQuery = { discoveryViewModel.searchByName(it) },
+                    onOpenFoundChat = { screen = Screen.Chat(it) },
+                    onSetDisplayName = { MeshManager.setDisplayName(it) },
                     onRequestPermissions = ::requestMissingPermissions,
                     onOpenBluetoothSettings = {
                         startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))

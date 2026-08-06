@@ -73,6 +73,8 @@ class Repository(private val db: AppDatabase) {
 
     suspend fun hasPeer(nodeId: String): Boolean = peerDao.get(nodeId) != null
 
+    suspend fun searchPeersByName(name: String): List<PeerEntity> = peerDao.searchByName(name)
+
     suspend fun upsertPeerFromScan(nodeId: String, name: String) {
         val ts = System.currentTimeMillis()
         val existing = peerDao.get(nodeId)

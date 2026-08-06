@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material.icons.filled.Settings
@@ -31,11 +32,16 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +49,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.bitchat.data.PeerEntity
+import com.bitchat.mesh.AdvertisePayload
 import com.bitchat.mesh.Peer
 
 private val OnlineGreen = Color(0xFF22C55E)
@@ -53,6 +61,10 @@ private val OfflineGray = Color(0xFF9E9E9E)
 fun DiscoveryScreen(
     state: MeshUiState,
     peers: List<Peer>,
+    foundPeers: List<PeerEntity>,
+    onSearchQuery: (String) -> Unit,
+    onOpenFoundChat: (String) -> Unit,
+    onSetDisplayName: (String) -> Unit,
     onRequestPermissions: () -> Unit,
     onOpenBluetoothSettings: () -> Unit,
     onStartMesh: () -> Unit,
@@ -60,6 +72,7 @@ fun DiscoveryScreen(
     onOpenChat: (String) -> Unit,
     onBack: () -> Unit,
 ) {
+    var query by rememberSaveable { mutableStateOf("") }
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -86,7 +99,13 @@ fun DiscoveryScreen(
         }
     ) { padding ->
         val sortedPeers = remember(peers) { peers.sortedByDescending { it.lastSeen } }
-        val others = remember(peers) { peers.filterNot { it.isSelf } }
+        val q = query.trim()
+        val visiblePeers = if (q.isEmpty()) sortedPeers
+        else sortedPeers.filter {
+            it.displayName.contains(q, ignoreCase = true) || it.nodeId.contains(q, ignoreCase = true)
+        }
+        val visibleIds = visiblePeers.map { it.nodeId }.toSet()
+        val historyMatches = foundPeers.filterNot { it.nodeId in visibleIds }
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -95,7 +114,20 @@ fun DiscoveryScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                IdentityCard(state)
+                IdentityCard(state, onSetDisplayName)
+            }
+            item {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = {
+                        query = it.take(24)
+                        onSearchQuery(it)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Find by username") },
+                    placeholder = { Text("Type a name (max 6 letters)") },
+                )
             }
             item {
                 MeshControlsCard(
@@ -106,14 +138,58 @@ fun DiscoveryScreen(
                     onStopMesh = onStopMesh,
                 )
             }
+            if (q.isNotEmpty() && historyMatches.isNotEmpty()) {
+                item {
+                    Card {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text(
+                                "Found in history",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                "This device was seen before. Messages queue up and deliver when you meet.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            historyMatches.forEach { peer ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            peer.displayName,
+                                            style = MaterialTheme.typography.titleMedium,
+                                        )
+                                        Text(
+                                            peer.nodeId,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    FilledTonalButton(onClick = { onOpenFoundChat(peer.nodeId) }) {
+                                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
+                                        Text("Message")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             item {
                 Text(
-                    "${others.size} nearby device${if (others.size == 1) "" else "s"}",
+                    "${visiblePeers.size} nearby device${if (visiblePeers.size == 1) "" else "s"}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
-            if (peers.any { it.isSelf } && others.isEmpty()) {
+            if (q.isEmpty() && visiblePeers.any { it.isSelf }) {
                 item {
                     Card {
                         Text(
@@ -126,12 +202,12 @@ fun DiscoveryScreen(
                     }
                 }
             }
-            if (others.isEmpty()) {
+            if (visiblePeers.isEmpty()) {
                 item {
                     EmptyStateCard()
                 }
             } else {
-                items(sortedPeers, key = { it.nodeId }) { peer ->
+                items(visiblePeers, key = { it.nodeId }) { peer ->
                     PeerCard(peer, onMessage = { onOpenChat(peer.nodeId) })
                 }
             }
@@ -140,16 +216,51 @@ fun DiscoveryScreen(
 }
 
 @Composable
-private fun IdentityCard(state: MeshUiState) {
+private fun IdentityCard(state: MeshUiState, onSetDisplayName: (String) -> Unit) {
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf(state.displayName) }
     Card {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text(
-                "You are ${state.displayName}",
-                style = MaterialTheme.typography.titleMedium,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "You are ${state.displayName}",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = {
+                    draft = state.displayName
+                    editing = !editing
+                }) {
+                    Icon(
+                        Icons.Filled.Edit,
+                        contentDescription = "Edit username",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+            if (editing) {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it.take(AdvertisePayload.MAX_NAME_BYTES) },
+                    singleLine = true,
+                    label = { Text("Username (max ${AdvertisePayload.MAX_NAME_BYTES} letters)") },
+                )
+                Button(
+                    onClick = {
+                        onSetDisplayName(draft)
+                        editing = false
+                    },
+                    enabled = draft.isNotBlank(),
+                ) {
+                    Text("Save username")
+                }
+            }
             Text(
                 "Node ID: ${state.nodeId.take(8)}…",
                 style = MaterialTheme.typography.bodySmall,

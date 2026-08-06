@@ -19,7 +19,7 @@ class MeshAdvertiser(context: Context) {
 
     val isActive: Boolean get() = active
 
-    fun start(nodeId: String, onResult: (Result) -> Unit) {
+    fun start(nodeId: String, name: String, onResult: (Result) -> Unit) {
         stop()
         listener = onResult
         val advertiser = adapter?.bluetoothLeAdvertiser
@@ -35,10 +35,9 @@ class MeshAdvertiser(context: Context) {
             .build()
         val data = AdvertiseData.Builder()
             .setIncludeDeviceName(false)
-            .setIncludeTxPowerLevel(true)
             .addServiceData(
                 ParcelUuid(MeshConstants.DISCOVERY_UUID),
-                AdvertisePayload.encode(nodeId)
+                AdvertisePayload.encode(nodeId, name)
             )
             .build()
         try {

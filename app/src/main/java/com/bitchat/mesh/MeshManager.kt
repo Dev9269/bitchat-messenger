@@ -70,8 +70,34 @@ object MeshManager {
     fun init(context: Context) {
         appContext = context.applicationContext
         nodeId.value = NodeIdentity.getNodeId(context)
-        displayName.value = NodeIdentity.displayName(nodeId.value)
+        displayName.value = NodeIdentity.getDisplayName(context, nodeId.value)
         refreshRuntimeState(context)
+    }
+
+    fun setDisplayName(name: String) {
+        val clean = name.trim().take(AdvertisePayload.MAX_NAME_BYTES)
+        val context = appContext ?: return
+        if (clean.isEmpty() || clean == displayName.value) return
+        NodeIdentity.setDisplayName(context, clean)
+        displayName.value = clean
+        val adv = advertiser
+        if (adv != null && isAdvertising.value) {
+            adv.stop()
+            advertiser = MeshAdvertiser(context).also { a ->
+                a.start(nodeId.value, clean) { result ->
+                    when (result) {
+                        is MeshAdvertiser.Result.Started -> {
+                            isAdvertising.value = true
+                            statusError.value = null
+                        }
+                        is MeshAdvertiser.Result.Failed -> {
+                            isAdvertising.value = false
+                            statusError.value = result.reason
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fun refreshRuntimeState(context: Context) {
@@ -85,7 +111,7 @@ object MeshManager {
         statusError.value = null
 
         advertiser = MeshAdvertiser(context).also { a ->
-            a.start(nodeId.value) { result ->
+            a.start(nodeId.value, displayName.value) { result ->
                 when (result) {
                     is MeshAdvertiser.Result.Started -> {
                         isAdvertising.value = true
@@ -120,7 +146,7 @@ object MeshManager {
             nodeId.value to Peer(
                 address = "",
                 nodeId = nodeId.value,
-                displayName = "You",
+                displayName = displayName.value,
                 rssi = 0,
                 lastSeen = System.currentTimeMillis(),
                 isSelf = true,
@@ -320,7 +346,9 @@ object MeshManager {
     private fun onScanResult(result: ScanResult) {
         val record = result.scanRecord ?: return
         val payload = record.getServiceData(ParcelUuid(MeshConstants.DISCOVERY_UUID)) ?: return
-        val peerNodeId = AdvertisePayload.decode(payload) ?: return
+        val decoded = AdvertisePayload.decode(payload) ?: return
+        val peerNodeId = decoded.nodeId
+        val peerName = decoded.name ?: NodeIdentity.displayName(peerNodeId)
         val now = System.currentTimeMillis()
         if (peerNodeId == nodeId.value) {
             _peers.update { map ->
@@ -332,13 +360,13 @@ object MeshManager {
             map + (peerNodeId to Peer(
                 address = result.device.address,
                 nodeId = peerNodeId,
-                displayName = NodeIdentity.displayName(peerNodeId),
+                displayName = peerName,
                 rssi = result.rssi,
                 lastSeen = now,
             ))
         }
         scope.launch {
-            DataGraph.repository.upsertPeerFromScan(peerNodeId, NodeIdentity.displayName(peerNodeId))
+            DataGraph.repository.upsertPeerFromScan(peerNodeId, peerName)
         }
     }
 

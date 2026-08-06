@@ -18,6 +18,9 @@ interface PeerDao {
     @Query("SELECT * FROM peers")
     suspend fun all(): List<PeerEntity>
 
+    @Query("SELECT * FROM peers WHERE displayName LIKE '%' || :name || '%' COLLATE NOCASE")
+    suspend fun searchByName(name: String): List<PeerEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(peer: PeerEntity)
 
