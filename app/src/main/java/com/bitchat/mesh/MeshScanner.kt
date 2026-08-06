@@ -21,8 +21,9 @@ class MeshScanner(context: Context) {
 
     private var scanning = false
     private var enabled = false
-    private var useExtended = true
+    private var useExtended = false
     private var failures = 0
+    private var lastResultAt = 0L
     private var resultListener: ((ScanResult) -> Unit)? = null
     private var errorListener: ((String) -> Unit)? = null
 
@@ -32,6 +33,7 @@ class MeshScanner(context: Context) {
         stop()
         enabled = true
         failures = 0
+        lastResultAt = System.currentTimeMillis()
         resultListener = onResult
         errorListener = onError
         startScanInternal()
@@ -40,6 +42,7 @@ class MeshScanner(context: Context) {
     fun stop() {
         enabled = false
         handler.removeCallbacks(restartRunnable)
+        handler.removeCallbacks(stallWatchdog)
         if (scanning) {
             try {
                 scanner?.stopScan(scanCallback)
@@ -62,6 +65,8 @@ class MeshScanner(context: Context) {
         if (useExtended) {
             builder.setLegacy(false)
             builder.setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED)
+        } else {
+            builder.setLegacy(true)
         }
         val filter = ScanFilter.Builder()
             .setServiceUuid(ParcelUuid(MeshConstants.DISCOVERY_UUID))
@@ -74,14 +79,32 @@ class MeshScanner(context: Context) {
         } catch (e: Exception) {
             errorListener?.invoke(e.message ?: "Failed to start scanning")
         }
+        handler.removeCallbacks(stallWatchdog)
+        handler.postDelayed(stallWatchdog, STALL_RESTART_MS)
     }
 
     private val restartRunnable = Runnable {
         if (enabled) startScanInternal()
     }
 
+    private val stallWatchdog = Runnable { onStallCheck() }
+
+    private fun onStallCheck() {
+        if (!enabled || !scanning) return
+        val quietFor = System.currentTimeMillis() - lastResultAt
+        if (quietFor >= STALL_RESTART_MS) {
+            stop()
+            enabled = true
+            lastResultAt = System.currentTimeMillis()
+            startScanInternal()
+        } else {
+            handler.postDelayed(stallWatchdog, STALL_RESTART_MS - quietFor)
+        }
+    }
+
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
+            lastResultAt = System.currentTimeMillis()
             resultListener?.invoke(result)
         }
 
@@ -89,9 +112,13 @@ class MeshScanner(context: Context) {
             scanning = false
             if (!enabled) return
             failures++
-            if (failures > 2) useExtended = false
+            if (failures > 2) useExtended = !useExtended
             errorListener?.invoke("Scan failed with code $errorCode, retrying")
             handler.postDelayed(restartRunnable, 4_000)
         }
+    }
+
+    private companion object {
+        private const val STALL_RESTART_MS = 30_000L
     }
 }
