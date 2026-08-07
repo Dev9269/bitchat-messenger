@@ -50,9 +50,11 @@ interface MessageDao {
     suspend fun allPending(): List<MessageEntity>
 
     @Query("""
-        SELECT m.conversationId AS conversationId, m.text AS lastText, m.timestamp AS lastTs, p.displayName AS title
+        SELECT m.conversationId AS conversationId, m.text AS lastText, m.timestamp AS lastTs,
+               p.displayName AS peerTitle, g.name AS groupTitle, m.broadcast AS broadcast
         FROM messages m
         LEFT JOIN peers p ON p.nodeId = m.conversationId
+        LEFT JOIN groups g ON g.groupId = m.conversationId
         WHERE m.id IN (SELECT MAX(id) FROM messages GROUP BY conversationId)
         ORDER BY m.timestamp DESC
     """)
@@ -63,5 +65,50 @@ data class ConversationRow(
     val conversationId: String,
     val lastText: String,
     val lastTs: Long,
-    val title: String?,
+    val peerTitle: String?,
+    val groupTitle: String?,
+    val broadcast: Boolean,
 )
+
+@Dao
+interface GroupDao {
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertGroup(group: GroupEntity)
+
+    @Query("SELECT * FROM groups ORDER BY createdAt DESC")
+    fun flowGroups(): Flow<List<GroupEntity>>
+
+    @Query("SELECT * FROM groups ORDER BY createdAt DESC")
+    suspend fun getGroups(): List<GroupEntity>
+
+    @Query("SELECT * FROM groups WHERE groupId = :groupId")
+    suspend fun getGroup(groupId: String): GroupEntity?
+
+    @Query("SELECT * FROM groups WHERE groupId = :groupId")
+    fun flowGroup(groupId: String): Flow<GroupEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMember(member: GroupMemberEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMembers(members: List<GroupMemberEntity>)
+
+    @Query("SELECT * FROM group_members WHERE groupId = :groupId ORDER BY addedAt ASC")
+    fun flowMembers(groupId: String): Flow<List<GroupMemberEntity>>
+
+    @Query("SELECT * FROM group_members WHERE groupId = :groupId AND nodeId = :nodeId LIMIT 1")
+    suspend fun isMember(groupId: String, nodeId: String): GroupMemberEntity?
+
+    @Query("SELECT nodeId FROM group_members WHERE groupId = :groupId")
+    suspend fun memberNodeIds(groupId: String): List<String>
+
+    @Query("UPDATE groups SET secretB64 = :secretB64 WHERE groupId = :groupId")
+    suspend fun setSecret(groupId: String, secretB64: String)
+
+    @Query("SELECT secretB64 FROM groups WHERE groupId = :groupId")
+    suspend fun secret(groupId: String): String
+
+    @Query("UPDATE group_members SET keyEnvB64 = :keyEnvB64 WHERE groupId = :groupId AND nodeId = :nodeId")
+    suspend fun setMemberKey(groupId: String, nodeId: String, keyEnvB64: String)
+}

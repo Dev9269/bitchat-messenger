@@ -4,12 +4,15 @@ import android.annotation.SuppressLint
 import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.os.ParcelUuid
+import android.util.Base64
 import com.bitchat.crypto.CryptoEngine
 import com.bitchat.data.DataGraph
 import com.bitchat.data.MessageEntity
 import com.bitchat.data.STATUS_DELIVERED
+import com.bitchat.data.STATUS_FAILED
 import com.bitchat.data.STATUS_PENDING
 import com.bitchat.data.STATUS_SENT
+import com.bitchat.online.OnlineService
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +26,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 
@@ -187,6 +191,7 @@ object MeshManager {
         }
         scope.launch {
             val msgId = MeshPacket.newMsgId()
+            val now = System.currentTimeMillis()
             DataGraph.repository.insertMessage(
                 MessageEntity(
                     msgId = msgId.hex(),
@@ -194,12 +199,13 @@ object MeshManager {
                     srcNodeId = nodeId.value,
                     dstNodeId = toNodeId,
                     text = text,
-                    timestamp = System.currentTimeMillis(),
+                    timestamp = now,
                     outbound = true,
                     deliveryStatus = STATUS_PENDING,
                     broadcast = false,
                 )
             )
+            OnlineService.sendDm(toNodeId, msgId.hex(), text, now)
             val peer = DataGraph.repository.peer(toNodeId)
             if (peer?.x25519PubKey == null) {
                 sendHandshake(toNodeId)
@@ -228,6 +234,188 @@ object MeshManager {
             val packets = buildBroadcastPackets(msgId, text)
             if (deliverToNetwork(packets)) {
                 DataGraph.repository.setStatus(msgId.hex(), STATUS_SENT)
+            }
+        }
+    }
+
+    fun createGroup(name: String, memberNodeIds: List<String>): String {
+        val clean = name.trim().take(40)
+        val groupId = MeshPacket.newMsgId().hex()
+        scope.launch {
+            val secret = Base64.encodeToString(CryptoEngine.newGroupKey(), Base64.NO_WRAP)
+            DataGraph.repository.createGroup(groupId, clean, nodeId.value)
+            DataGraph.repository.setGroupSecret(groupId, secret)
+            val members = LinkedHashSet<String>().apply {
+                add(nodeId.value)
+                addAll(memberNodeIds.filter { it.isNotBlank() && it != nodeId.value })
+            }
+            DataGraph.repository.addGroupMembers(
+                groupId,
+                members.map { n -> n to (if (n == nodeId.value) displayName.value else NodeIdentity.displayName(n)) }
+            )
+            val envelopes = HashMap<String, String>()
+            for (member in members) {
+                if (member == nodeId.value) continue
+                val pub = DataGraph.repository.peer(member)?.x25519PubKey ?: OnlineService.xPubFor(member)
+                if (pub != null) {
+                    val env = CryptoEngine.wrapGroupKey(pub, groupId, Base64.decode(secret, Base64.NO_WRAP))
+                    val envB64 = Base64.encodeToString(env, Base64.NO_WRAP)
+                    DataGraph.repository.setGroupMemberKey(groupId, member, envB64)
+                    envelopes[member] = envB64
+                }
+            }
+            OnlineService.pushGroup(groupId, clean, members.toList(), envelopes)
+            val info = JSONObject()
+                .put("g", groupId)
+                .put("n", clean)
+                .put("m", JSONArray().also { arr -> members.forEach { arr.put(it) } })
+                .put("k", JSONObject().also { obj -> envelopes.forEach { (n, env) -> obj.put(n, env) } })
+            val packet = MeshPacket.Packet(
+                type = MeshPacket.TYPE_GROUP_INFO,
+                msgId = MeshPacket.newMsgId(),
+                src = nodeId.value,
+                dst = MeshPacket.BROADCAST_NODE_HEX,
+                ttl = MeshPacket.DEFAULT_TTL,
+                payload = info.toString().toByteArray(Charsets.UTF_8),
+            )
+            deliverToNetwork(listOf(packet))
+        }
+        return groupId
+    }
+
+    fun sendGroupText(groupId: String, text: String) {
+        scope.launch {
+            val msgId = MeshPacket.newMsgId()
+            val now = System.currentTimeMillis()
+            DataGraph.repository.insertMessage(
+                MessageEntity(
+                    msgId = msgId.hex(),
+                    conversationId = groupId,
+                    srcNodeId = nodeId.value,
+                    dstNodeId = groupId,
+                    text = text,
+                    timestamp = now,
+                    outbound = true,
+                    deliveryStatus = STATUS_PENDING,
+                    broadcast = false,
+                    isGroup = true,
+                )
+            )
+            val secret = DataGraph.repository.groupSecret(groupId)
+            if (secret == null) {
+                DataGraph.repository.setStatus(msgId.hex(), STATUS_FAILED)
+                return@launch
+            }
+            val key = Base64.decode(secret, Base64.NO_WRAP)
+            val ciphertext = CryptoEngine.encryptGroupMessage(key, msgId, text.toByteArray(Charsets.UTF_8))
+            val signed = CryptoEngine.signBroadcast(ciphertext)
+            val signedB64 = Base64.encodeToString(signed, Base64.NO_WRAP)
+            OnlineService.sendGroupMessage(groupId, msgId.hex(), signedB64, now)
+            val packets = buildGroupPackets(signed, msgId, groupId)
+            if (deliverToNetwork(packets)) {
+                DataGraph.repository.setStatus(msgId.hex(), STATUS_SENT)
+            }
+        }
+    }
+
+    private fun buildGroupPackets(signed: ByteArray, msgId: ByteArray, groupId: String): List<MeshPacket.Packet> {
+        return Fragmentation.split(signed, MeshPacket.FRAGMENT_PAYLOAD_SIZE).map {
+            MeshPacket.Packet(
+                type = MeshPacket.TYPE_GROUP,
+                msgId = msgId,
+                src = nodeId.value,
+                dst = groupId,
+                ttl = MeshPacket.DEFAULT_TTL,
+                payload = it,
+            )
+        }
+    }
+
+    fun receiveOnlineDm(msgIdHex: String, senderNode: String, payload: String, ts: Long) {
+        scope.launch {
+            try {
+                val peerPub = OnlineService.xPubFor(senderNode) ?: return@launch
+                val envelope = try {
+                    Base64.decode(payload, Base64.NO_WRAP)
+                } catch (_: Exception) {
+                    return@launch
+                }
+                val plaintext = CryptoEngine.decryptDM(peerPub, msgIdHex.hexToBytes(), envelope) ?: return@launch
+                val json = JSONObject(String(plaintext, Charsets.UTF_8))
+                val text = json.optString("t")
+                if (text.isEmpty()) return@launch
+                val name = json.optString("u").ifEmpty { NodeIdentity.displayName(senderNode) }
+                DataGraph.repository.upsertPeerFromScan(senderNode, name)
+                DataGraph.repository.insertMessage(
+                    MessageEntity(
+                        msgId = msgIdHex,
+                        conversationId = senderNode,
+                        srcNodeId = senderNode,
+                        dstNodeId = nodeId.value,
+                        text = text,
+                        timestamp = json.optLong("ts", ts),
+                        outbound = false,
+                        deliveryStatus = STATUS_DELIVERED,
+                        broadcast = false,
+                    )
+                )
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    fun receiveOnlineGroupMessage(msgIdHex: String, groupId: String, senderNode: String, signedB64: String, ts: Long) {
+        scope.launch {
+            try {
+                if (!DataGraph.repository.isGroupMember(groupId, nodeId.value)) return@launch
+                val decoded = Base64.decode(signedB64, Base64.NO_WRAP)
+                val ciphertext = CryptoEngine.verifyBroadcast(decoded) ?: return@launch
+                val secretRaw = DataGraph.repository.groupSecret(groupId) ?: return@launch
+                val key = Base64.decode(secretRaw, Base64.NO_WRAP)
+                val plaintext = CryptoEngine.decryptGroupMessage(key, msgIdHex.hexToBytes(), ciphertext) ?: return@launch
+                DataGraph.repository.insertMessage(
+                    MessageEntity(
+                        msgId = msgIdHex,
+                        conversationId = groupId,
+                        srcNodeId = senderNode,
+                        dstNodeId = nodeId.value,
+                        text = String(plaintext, Charsets.UTF_8),
+                        timestamp = ts,
+                        outbound = false,
+                        deliveryStatus = STATUS_DELIVERED,
+                        broadcast = false,
+                        isGroup = true,
+                    )
+                )
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+fun receiveOnlineGroupInvite(groupId: String) {
+        scope.launch {
+            try {
+                if (DataGraph.repository.isGroupMember(groupId, nodeId.value)) return@launch
+                OnlineService.syncGroup(groupId) { name, memberIds, myKeyEnv, createdBy ->
+                    scope.launch {
+                        if (memberIds.contains(nodeId.value)) {
+                            DataGraph.repository.createGroup(groupId, name, groupId)
+                            DataGraph.repository.addGroupMembers(
+                                groupId,
+                                memberIds.map { n -> n to (if (n == nodeId.value) displayName.value else NodeIdentity.displayName(n)) }
+                            )
+                            val creatorPub = OnlineService.xPubFor(createdBy)
+                            if (creatorPub != null && !myKeyEnv.isNullOrEmpty()) {
+                                val env = Base64.decode(myKeyEnv, Base64.NO_WRAP)
+                                val secret = CryptoEngine.unwrapGroupKey(creatorPub, groupId, env)
+                                if (secret != null) {
+                                    DataGraph.repository.setGroupSecret(groupId, Base64.encodeToString(secret, Base64.NO_WRAP))
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
             }
         }
     }
@@ -393,6 +581,8 @@ object MeshManager {
                     relayIt(packet)
                 }
             }
+            MeshPacket.TYPE_GROUP -> handleGroup(packet)
+            MeshPacket.TYPE_GROUP_INFO -> handleGroupInfo(packet)
         }
     }
 
@@ -489,6 +679,71 @@ object MeshManager {
         }
     }
 
+    private fun handleGroup(packet: MeshPacket.Packet) {
+        val msgIdHex = packet.msgId.hex()
+        if (!relay.isNew(msgIdHex)) return
+        relayIt(packet)
+        scope.launch {
+            if (!DataGraph.repository.isGroupMember(packet.dst, nodeId.value)) return@launch
+            val assembled = relay.addFragment(packet) ?: return@launch
+            val ciphertext = CryptoEngine.verifyBroadcast(assembled) ?: return@launch
+            val secretRaw = DataGraph.repository.groupSecret(packet.dst) ?: return@launch
+            val key = Base64.decode(secretRaw, Base64.NO_WRAP)
+            val plaintext = CryptoEngine.decryptGroupMessage(key, packet.msgId, ciphertext) ?: return@launch
+            DataGraph.repository.insertMessage(
+                MessageEntity(
+                    msgId = msgIdHex,
+                    conversationId = packet.dst,
+                    srcNodeId = packet.src,
+                    dstNodeId = nodeId.value,
+                    text = String(plaintext, Charsets.UTF_8),
+                    timestamp = System.currentTimeMillis(),
+                    outbound = false,
+                    deliveryStatus = STATUS_DELIVERED,
+                    broadcast = false,
+                    isGroup = true,
+                )
+            )
+        }
+    }
+
+    private fun handleGroupInfo(packet: MeshPacket.Packet) {
+        val msgIdHex = packet.msgId.hex()
+        if (!relay.isNew(msgIdHex)) return
+        relayIt(packet)
+        scope.launch {
+            try {
+                val json = JSONObject(String(packet.payload, Charsets.UTF_8))
+                val groupId = json.getString("g")
+                val name = json.getString("n")
+                val members = json.optJSONArray("m") ?: return@launch
+                val memberList = (0 until members.length()).map { members.getString(it) }
+                if (!memberList.contains(nodeId.value)) return@launch
+                if (DataGraph.repository.isGroupMember(groupId, nodeId.value)) return@launch
+                DataGraph.repository.createGroup(groupId, name, packet.src)
+                DataGraph.repository.addGroupMembers(
+                    groupId,
+                    memberList.map { n -> n to (if (n == nodeId.value) displayName.value else NodeIdentity.displayName(n)) }
+                )
+                val keys = json.optJSONObject("k")
+                if (keys != null && keys.has(nodeId.value)) {
+                    val envB64 = keys.optString(nodeId.value)
+                    if (envB64.isNotEmpty()) {
+                        val creatorPub = OnlineService.xPubFor(packet.src)
+                        if (creatorPub != null) {
+                            val env = Base64.decode(envB64, Base64.NO_WRAP)
+                            val secret = CryptoEngine.unwrapGroupKey(creatorPub, groupId, env)
+                            if (secret != null) {
+                                DataGraph.repository.setGroupSecret(groupId, Base64.encodeToString(secret, Base64.NO_WRAP))
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     private fun handleAck(packet: MeshPacket.Packet) {
         scope.launch {
             DataGraph.repository.setStatus(packet.msgId.hex(), STATUS_DELIVERED)
@@ -562,10 +817,23 @@ object MeshManager {
     private suspend fun flushPending() {
         val pending = DataGraph.repository.allPending()
         for (message in pending) {
-            if (message.conversationId == MeshConstants.PUBLIC_CHANNEL_ID) {
+            if (message.broadcast) {
                 val packets = buildBroadcastPackets(message.msgId.hexToBytes(), message.text)
                 if (deliverToNetwork(packets)) {
                     DataGraph.repository.setStatus(message.msgId, STATUS_SENT)
+                }
+            } else if (message.isGroup) {
+                val secretRaw = DataGraph.repository.groupSecret(message.conversationId)
+                if (secretRaw != null) {
+                    val key = Base64.decode(secretRaw, Base64.NO_WRAP)
+                    val ciphertext = CryptoEngine.encryptGroupMessage(key, message.msgId.hexToBytes(), message.text.toByteArray(Charsets.UTF_8))
+                    val signed = CryptoEngine.signBroadcast(ciphertext)
+                    val packets = buildGroupPackets(signed, message.msgId.hexToBytes(), message.conversationId)
+                    if (deliverToNetwork(packets)) {
+                        DataGraph.repository.setStatus(message.msgId, STATUS_SENT)
+                    }
+                } else {
+                    DataGraph.repository.setStatus(message.msgId, STATUS_FAILED)
                 }
             } else {
                 val peer = DataGraph.repository.peer(message.conversationId) ?: continue

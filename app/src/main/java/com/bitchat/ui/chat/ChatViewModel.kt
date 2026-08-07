@@ -12,6 +12,7 @@ import com.bitchat.mesh.MeshManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
@@ -21,21 +22,33 @@ class ChatViewModel(private val conversationId: String) : ViewModel() {
 
     val isBroadcast = conversationId == MeshConstants.PUBLIC_CHANNEL_ID
 
+    private val group: StateFlow<com.bitchat.data.GroupEntity?> =
+        if (isBroadcast) {
+            MutableStateFlow(null)
+        } else {
+            repository.groupFlow(conversationId)
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        }
+
+    val isGroup: StateFlow<Boolean> = group.map { it != null }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     val title: StateFlow<String> =
         if (isBroadcast) {
             MutableStateFlow("Public channel")
         } else {
-            repository.peerFlow(conversationId)
-                .map { it?.displayName ?: "Unknown" }
-                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "Unknown")
+            combine(group, repository.peerFlow(conversationId)) { g, p ->
+                g?.name ?: p?.displayName ?: "Unknown"
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "Unknown")
         }
 
     val peerOnline: StateFlow<Boolean> =
         if (isBroadcast) {
             MutableStateFlow(false)
         } else {
-            MeshManager.peers.map { it.containsKey(conversationId) }
-                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+            combine(MeshManager.peers, isGroup) { peers, isGrp ->
+                !isGrp && peers.containsKey(conversationId)
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
         }
 
     val messages: StateFlow<List<ChatMessage>> = repository.messages(conversationId)
@@ -43,7 +56,11 @@ class ChatViewModel(private val conversationId: String) : ViewModel() {
 
     fun send(text: String) {
         if (text.isBlank()) return
-        MeshManager.sendText(conversationId, text)
+        when {
+            isBroadcast -> MeshManager.sendBroadcast(text)
+            group.value != null -> MeshManager.sendGroupText(conversationId, text)
+            else -> MeshManager.sendText(conversationId, text)
+        }
     }
 
     companion object {

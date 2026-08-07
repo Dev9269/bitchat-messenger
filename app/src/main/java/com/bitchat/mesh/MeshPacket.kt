@@ -13,6 +13,8 @@ object MeshPacket {
     const val TYPE_BROADCAST = 2
     const val TYPE_HANDSHAKE = 3
     const val TYPE_ACK = 4
+    const val TYPE_GROUP = 5
+    const val TYPE_GROUP_INFO = 6
 
     const val DEFAULT_TTL = 5
     const val MAX_PACKET_BYTES = 620

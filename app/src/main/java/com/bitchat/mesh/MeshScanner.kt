@@ -4,13 +4,11 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
-import android.os.ParcelUuid
 
 @SuppressLint("MissingPermission")
 class MeshScanner(context: Context) {
@@ -69,11 +67,8 @@ class MeshScanner(context: Context) {
         } else {
             builder.setLegacy(true)
         }
-        val filter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid(MeshConstants.DISCOVERY_UUID))
-            .build()
         try {
-            leScanner.startScan(listOf(filter), builder.build(), scanCallback)
+            leScanner.startScan(null, builder.build(), scanCallback)
             scanning = true
         } catch (e: SecurityException) {
             errorListener?.invoke("Missing permission to scan")

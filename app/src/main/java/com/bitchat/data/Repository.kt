@@ -15,6 +15,7 @@ data class Conversation(
     val lastText: String,
     val lastTs: Long,
     val isBroadcast: Boolean,
+    val isGroup: Boolean,
     val online: Boolean,
 )
 
@@ -27,6 +28,7 @@ data class ChatMessage(
     val outbound: Boolean,
     val deliveryStatus: Int,
     val broadcast: Boolean,
+    val isGroup: Boolean,
 )
 
 fun MessageEntity.toChatMessage() = ChatMessage(
@@ -38,26 +40,29 @@ fun MessageEntity.toChatMessage() = ChatMessage(
     outbound = outbound,
     deliveryStatus = deliveryStatus,
     broadcast = broadcast,
+    isGroup = isGroup,
 )
 
 class Repository(private val db: AppDatabase) {
 
     private val peerDao = db.peerDao()
     private val messageDao = db.messageDao()
+    private val groupDao = db.groupDao()
 
     fun conversations(): Flow<List<Conversation>> = combine(
         messageDao.conversationRows(),
         MeshManager.peers,
     ) { rows, livePeers ->
         rows.map { row ->
+            val isGroup = row.groupTitle != null
             Conversation(
                 conversationId = row.conversationId,
-                title = row.title ?: "Public channel",
+                title = row.groupTitle ?: row.peerTitle ?: "Public channel",
                 lastText = row.lastText,
                 lastTs = row.lastTs,
-                isBroadcast = row.conversationId == MeshConstants.PUBLIC_CHANNEL_ID,
-                online = row.conversationId != MeshConstants.PUBLIC_CHANNEL_ID &&
-                    livePeers.containsKey(row.conversationId),
+                isBroadcast = row.broadcast,
+                isGroup = isGroup,
+                online = !isGroup && !row.broadcast && livePeers.containsKey(row.conversationId),
             )
         }
     }
@@ -66,6 +71,66 @@ class Repository(private val db: AppDatabase) {
         messageDao.flowMessages(conversationId).map { list ->
             list.map { it.toChatMessage() }
         }
+
+    fun groups(): Flow<List<GroupEntity>> = groupDao.flowGroups()
+
+    suspend fun allGroups(): List<GroupEntity> = groupDao.getGroups()
+
+    fun groupFlow(groupId: String): Flow<GroupEntity?> = groupDao.flowGroup(groupId)
+
+    fun groupMembers(groupId: String): Flow<List<GroupMemberEntity>> = groupDao.flowMembers(groupId)
+
+    suspend fun isGroupMember(groupId: String, nodeId: String): Boolean =
+        groupDao.isMember(groupId, nodeId) != null
+
+    suspend fun group(groupId: String): GroupEntity? = groupDao.getGroup(groupId)
+
+    suspend fun createGroup(groupId: String, name: String, createdBy: String) {
+        groupDao.insertGroup(
+            GroupEntity(
+                groupId = groupId,
+                name = name,
+                createdAt = System.currentTimeMillis(),
+                createdByNodeId = createdBy,
+            )
+        )
+    }
+
+    suspend fun upsertGroup(group: GroupEntity) {
+        groupDao.insertGroup(group)
+    }
+
+    suspend fun addGroupMember(groupId: String, nodeId: String, displayName: String) {
+        groupDao.insertMember(
+            GroupMemberEntity(
+                groupId = groupId,
+                nodeId = nodeId,
+                displayName = displayName,
+                addedAt = System.currentTimeMillis(),
+            )
+        )
+    }
+
+    suspend fun addGroupMembers(groupId: String, members: List<Pair<String, String>>) {
+        val ts = System.currentTimeMillis()
+        groupDao.insertMembers(
+            members.map { (nodeId, name) ->
+                GroupMemberEntity(groupId, nodeId, name, ts)
+            }
+        )
+    }
+
+    suspend fun setGroupSecret(groupId: String, secretB64: String) {
+        groupDao.setSecret(groupId, secretB64)
+    }
+
+    suspend fun groupSecret(groupId: String): String? = groupDao.secret(groupId).ifEmpty { null }
+
+    suspend fun setGroupMemberKey(groupId: String, nodeId: String, keyEnvB64: String) {
+        groupDao.setMemberKey(groupId, nodeId, keyEnvB64)
+    }
+
+    fun memberNamesFlow(groupId: String): Flow<List<GroupMemberEntity>> = groupDao.flowMembers(groupId)
 
     suspend fun peer(nodeId: String): PeerEntity? = peerDao.get(nodeId)
 

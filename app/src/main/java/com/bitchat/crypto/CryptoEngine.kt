@@ -68,23 +68,87 @@ object CryptoEngine {
 
     fun x25519PublicKey(): ByteArray = xPub
 
-    private fun messageKey(peerPub: ByteArray, msgId: ByteArray): ByteArray {
-        val agreement = X25519Agreement()
-        agreement.init(xPriv)
-        val shared = ByteArray(agreement.agreementSize)
-        agreement.calculateAgreement(X25519PublicKeyParameters(peerPub, 0), shared, 0)
+    private fun deriveKey(material: ByteArray, salt: ByteArray): ByteArray {
         val hkdf = HKDFBytesGenerator(SHA256Digest())
-        hkdf.init(HKDFParameters(shared, null, "bitchat-dm".toByteArray(Charsets.UTF_8) + msgId))
+        hkdf.init(HKDFParameters(material, null, salt))
         val key = ByteArray(32)
         hkdf.generateBytes(key, 0, key.size)
         return key
     }
 
+    private fun messageKey(peerPub: ByteArray, msgId: ByteArray): ByteArray {
+        val agreement = X25519Agreement()
+        agreement.init(xPriv)
+        val shared = ByteArray(agreement.agreementSize)
+        agreement.calculateAgreement(X25519PublicKeyParameters(peerPub, 0), shared, 0)
+        return deriveKey(shared, "bitchat-dm".toByteArray(Charsets.UTF_8) + msgId)
+    }
+
+    private fun sharedSecret(peerPub: ByteArray): ByteArray {
+        val agreement = X25519Agreement()
+        agreement.init(xPriv)
+        val shared = ByteArray(agreement.agreementSize)
+        agreement.calculateAgreement(X25519PublicKeyParameters(peerPub, 0), shared, 0)
+        return shared
+    }
+
     fun encryptDM(peerPub: ByteArray, msgId: ByteArray, plaintext: ByteArray): ByteArray {
         val key = messageKey(peerPub, msgId)
+        return chachaEncrypt(key, msgId, plaintext)
+    }
+
+    fun decryptDM(peerPub: ByteArray, msgId: ByteArray, envelope: ByteArray): ByteArray? {
+        if (envelope.size < 28) return null
+        return try {
+            val key = messageKey(peerPub, msgId)
+            chachaDecrypt(key, msgId, envelope)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun newGroupKey(): ByteArray = ByteArray(32).also { random.nextBytes(it) }
+
+    fun wrapGroupKey(memberPub: ByteArray, groupId: String, groupKey: ByteArray): ByteArray {
+        val key = deriveKey(sharedSecret(memberPub), "bitchat-gk".toByteArray(Charsets.UTF_8) + groupId.toByteArray(Charsets.UTF_8))
+        val ad = groupKeySalt(groupId)
+        return chachaEncrypt(key, ad, groupKey)
+    }
+
+    fun unwrapGroupKey(memberPub: ByteArray, groupId: String, envelope: ByteArray): ByteArray? {
+        if (envelope.size < 28) return null
+        return try {
+            val key = deriveKey(sharedSecret(memberPub), "bitchat-gk".toByteArray(Charsets.UTF_8) + groupId.toByteArray(Charsets.UTF_8))
+            chachaDecrypt(key, groupKeySalt(groupId), envelope)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun encryptGroupMessage(groupKey: ByteArray, msgId: ByteArray, plaintext: ByteArray): ByteArray {
+        val key = deriveKey(groupKey, "bitchat-gm".toByteArray(Charsets.UTF_8) + msgId)
+        return chachaEncrypt(key, msgId, plaintext)
+    }
+
+    fun decryptGroupMessage(groupKey: ByteArray, msgId: ByteArray, envelope: ByteArray): ByteArray? {
+        if (envelope.size < 28) return null
+        return try {
+            val key = deriveKey(groupKey, "bitchat-gm".toByteArray(Charsets.UTF_8) + msgId)
+            chachaDecrypt(key, msgId, envelope)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun groupKeySalt(groupId: String): ByteArray =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest("bitchat-gk:$groupId".toByteArray(Charsets.UTF_8))
+            .copyOfRange(0, 16)
+
+    private fun chachaEncrypt(key: ByteArray, ad: ByteArray, plaintext: ByteArray): ByteArray {
         val nonce = ByteArray(12).also { random.nextBytes(it) }
         val cipher = ChaCha20Poly1305()
-        cipher.init(true, AEADParameters(KeyParameter(key), HMAC_SIZE, nonce, msgId))
+        cipher.init(true, AEADParameters(KeyParameter(key), HMAC_SIZE, nonce, ad))
         val out = ByteArray(12 + cipher.getOutputSize(plaintext.size))
         nonce.copyInto(out, 0)
         val len = cipher.processBytes(plaintext, 0, plaintext.size, out, 12)
@@ -92,20 +156,14 @@ object CryptoEngine {
         return out
     }
 
-    fun decryptDM(peerPub: ByteArray, msgId: ByteArray, envelope: ByteArray): ByteArray? {
-        if (envelope.size < 28) return null
-        return try {
-            val key = messageKey(peerPub, msgId)
-            val cipher = ChaCha20Poly1305()
-            cipher.init(false, AEADParameters(KeyParameter(key), HMAC_SIZE, envelope.copyOfRange(0, 12), msgId))
-            val ct = envelope.copyOfRange(12, envelope.size)
-            val out = ByteArray(cipher.getOutputSize(ct.size))
-            val len = cipher.processBytes(ct, 0, ct.size, out, 0)
-            cipher.doFinal(out, len)
-            out
-        } catch (_: Exception) {
-            null
-        }
+    private fun chachaDecrypt(key: ByteArray, ad: ByteArray, envelope: ByteArray): ByteArray {
+        val cipher = ChaCha20Poly1305()
+        cipher.init(false, AEADParameters(KeyParameter(key), HMAC_SIZE, envelope.copyOfRange(0, 12), ad))
+        val ct = envelope.copyOfRange(12, envelope.size)
+        val out = ByteArray(cipher.getOutputSize(ct.size))
+        val len = cipher.processBytes(ct, 0, ct.size, out, 0)
+        cipher.doFinal(out, len)
+        return out
     }
 
     fun signBroadcast(text: ByteArray): ByteArray {

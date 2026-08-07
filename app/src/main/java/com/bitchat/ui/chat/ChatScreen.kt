@@ -61,6 +61,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val title by viewModel.title.collectAsStateWithLifecycle()
     val online by viewModel.peerOnline.collectAsStateWithLifecycle()
+    val isGroup by viewModel.isGroup.collectAsStateWithLifecycle()
     var input by rememberSaveable { mutableStateOf("") }
 
     Scaffold(
@@ -69,7 +70,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(title, fontWeight = FontWeight.SemiBold)
-                        if (!viewModel.isBroadcast) {
+                        if (!viewModel.isBroadcast && !isGroup) {
                             Box(
                                 modifier = Modifier
                                     .padding(start = 8.dp)
@@ -103,13 +104,28 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(messages.asReversed(), key = { it.id }) { message ->
-                    MessageBubble(message, broadcast = viewModel.isBroadcast)
+                    MessageBubble(
+                        message = message,
+                        showSender = viewModel.isBroadcast || isGroup,
+                    )
                 }
                 if (viewModel.isBroadcast) {
                     item {
                         Card {
                             Text(
                                 "Public channel: sent to every node in range, relayed through the mesh. Signed, not encrypted.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(12.dp),
+                            )
+                        }
+                    }
+                }
+                if (isGroup) {
+                    item {
+                        Card {
+                            Text(
+                                "Group chat: signed and relayed through the mesh to all members.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(12.dp),
@@ -149,7 +165,7 @@ fun ChatScreen(conversationId: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage, broadcast: Boolean) {
+private fun MessageBubble(message: ChatMessage, showSender: Boolean) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.outbound) Arrangement.End else Arrangement.Start,
@@ -157,7 +173,7 @@ private fun MessageBubble(message: ChatMessage, broadcast: Boolean) {
         Column(
             horizontalAlignment = if (message.outbound) Alignment.End else Alignment.Start,
         ) {
-            if (!message.outbound && broadcast) {
+            if (!message.outbound && showSender) {
                 Text(
                     "Node-" + message.srcNodeId.take(4).uppercase(),
                     style = MaterialTheme.typography.labelSmall,

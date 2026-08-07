@@ -18,6 +18,27 @@ data class PeerEntity(
     val createdAt: Long,
 )
 
+@Entity(tableName = "groups")
+data class GroupEntity(
+    @PrimaryKey val groupId: String,
+    val name: String,
+    val createdAt: Long,
+    val createdByNodeId: String,
+    val secretB64: String = "",
+)
+
+@Entity(
+    tableName = "group_members",
+    primaryKeys = ["groupId", "nodeId"],
+)
+data class GroupMemberEntity(
+    val groupId: String,
+    val nodeId: String,
+    val displayName: String,
+    val addedAt: Long,
+    val keyEnvB64: String = "",
+)
+
 @Entity(
     tableName = "messages",
     indices = [
@@ -36,4 +57,5 @@ data class MessageEntity(
     val outbound: Boolean,
     val deliveryStatus: Int,
     val broadcast: Boolean,
+    val isGroup: Boolean = false,
 )

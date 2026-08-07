@@ -26,13 +26,17 @@ import com.bitchat.mesh.PermissionRequirements
 import com.bitchat.ui.chat.ChatScreen
 import com.bitchat.ui.discovery.DiscoveryScreen
 import com.bitchat.ui.discovery.DiscoveryViewModel
+import com.bitchat.ui.groups.GroupsScreen
 import com.bitchat.ui.home.HomeScreen
 import com.bitchat.ui.home.HomeViewModel
+import com.bitchat.ui.online.OnlineSettingsScreen
 import com.bitchat.ui.theme.BitchatTheme
 
 sealed interface Screen {
     data object Home : Screen
     data object Nearby : Screen
+    data object CreateGroup : Screen
+    data object OnlineSettings : Screen
     data class Chat(val conversationId: String) : Screen
 }
 
@@ -80,6 +84,25 @@ class MainActivity : ComponentActivity() {
                     conversations = conversations,
                     onOpenChat = { screen = Screen.Chat(it) },
                     onOpenNearby = { screen = Screen.Nearby },
+                    onCreateGroup = { screen = Screen.CreateGroup },
+                    onOpenOnline = { screen = Screen.OnlineSettings },
+                )
+            }
+
+            is Screen.OnlineSettings -> {
+                OnlineSettingsScreen(onBack = { screen = Screen.Home })
+            }
+
+            is Screen.CreateGroup -> {
+                val discoveryViewModel: DiscoveryViewModel = viewModel()
+                val peers by MeshManager.peers.collectAsStateWithLifecycle()
+                val searchResults by discoveryViewModel.searchResults.collectAsStateWithLifecycle()
+                GroupsScreen(
+                    peers = peers.values.toList(),
+                    searchResults = searchResults,
+                    onSearchQuery = { discoveryViewModel.searchByName(it) },
+                    onBack = { screen = Screen.Home },
+                    onGroupCreated = { screen = Screen.Chat(it) },
                 )
             }
 

@@ -14,12 +14,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -42,6 +46,8 @@ fun HomeScreen(
     conversations: List<Conversation>,
     onOpenChat: (String) -> Unit,
     onOpenNearby: () -> Unit,
+    onCreateGroup: () -> Unit,
+    onOpenOnline: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -53,14 +59,26 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 },
+                actions = {
+                    IconButton(onClick = onOpenOnline) {
+                        Icon(Icons.Filled.Cloud, contentDescription = "Online mode settings")
+                    }
+                },
                 colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 )
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onOpenNearby) {
-                Icon(Icons.Filled.Radar, contentDescription = "Find nearby devices")
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                FloatingActionButton(onClick = onCreateGroup) {
+                    Icon(Icons.Filled.GroupAdd, contentDescription = "Create group")
+                }
+                FloatingActionButton(onClick = onOpenNearby) {
+                    Icon(Icons.Filled.Radar, contentDescription = "Find nearby devices")
+                }
             }
         }
     ) { padding ->
@@ -122,6 +140,13 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.size(22.dp),
                     )
+                } else if (conversation.isGroup) {
+                    Icon(
+                        Icons.Filled.Groups,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(22.dp),
+                    )
                 } else {
                     Text(
                         conversation.title.take(1).uppercase(),
@@ -143,7 +168,7 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                    if (!conversation.isBroadcast) {
+                    if (!conversation.isBroadcast && !conversation.isGroup) {
                         Box(
                             modifier = Modifier
                                 .padding(start = 6.dp)
