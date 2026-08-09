@@ -7,7 +7,7 @@ import com.bitchat.mesh.MeshManager
 import com.bitchat.online.OnlineService
 import com.bitchat.security.AccessControl
 
-class BitchatApp : Application() {
+class GhostwireApp : Application() {
     override fun onCreate() {
         super.onCreate()
         DataGraph.init(this)

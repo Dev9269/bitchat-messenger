@@ -1,4 +1,4 @@
-# Ghostwire — Anonymous Wireless Mesh Messenger
+﻿# Ghostwire — Anonymous Wireless Mesh Messenger
 
 Offline, decentralized peer-to-peer messaging over Bluetooth Low Energy. No internet,
 no server, no Google Play Services. Designed for small trusted groups who want
@@ -37,7 +37,7 @@ anonymity and full control of their network.
 
 ```
 app/src/main/java/com/bitchat/
-├── BitchatApp.kt          Initializes data, crypto, mesh
+├── GhostwireApp.kt          Initializes data, crypto, mesh
 ├── MainActivity.kt        Permissions + screen navigation
 ├── mesh/                  BLE transport + protocol
 │   ├── MeshAdvertiser.kt  Advertising (peripheral role)

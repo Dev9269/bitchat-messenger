@@ -4,8 +4,57 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- Halo glow behind hexagon -->
     <path
-        android:fillColor="#FFFFFFFF"
-        android:fillType="evenOdd"
-        android:pathData="M38,22 h32 a8,8 0 0 1 8,8 v22 a8,8 0 0 1 -8,8 h-22 l-8,7 v-7 h-8 a8,8 0 0 1 -8,-8 v-22 a8,8 0 0 1 8,-8 z M43.5,41 a3.5,3.5 0 1 0 -7,0 a3.5,3.5 0 1 0 7,0 z M57.5,41 a3.5,3.5 0 1 0 -7,0 a3.5,3.5 0 1 0 7,0 z M71.5,41 a3.5,3.5 0 1 0 -7,0 a3.5,3.5 0 1 0 7,0 z" />
+        android:strokeColor="#39E0FF"
+        android:strokeWidth="6"
+        android:strokeAlpha="0.25"
+        android:pathData="M54,25.8 L74.4,39.9 L74.4,68.1 L54,82.2 L33.6,68.1 L33.6,39.9 Z" />
+
+    <!-- Hexagon shell -->
+    <path
+        android:strokeColor="#4BD8FF"
+        android:strokeWidth="2.2"
+        android:pathData="M54,25.8 L74.4,39.9 L74.4,68.1 L54,82.2 L33.6,68.1 L33.6,39.9 Z" />
+    <path
+        android:strokeColor="#4BD8FF"
+        android:strokeWidth="1"
+        android:strokeAlpha="0.5"
+        android:pathData="M54,29.6 L66.5,42.4 L66.5,65.6 L54,78.4 L41.5,65.6 L41.5,42.4 Z" />
+
+    <!-- G glyph: magenta glitch (right offset) -->
+    <path
+        android:strokeColor="#FF2E9E"
+        android:strokeWidth="4.4"
+        android:strokeLineCap="round"
+        android:pathData="M45.2,46.3 H57.2 A11,11 0 0 1 57.2,68.3 H53.2 M45.2,46.3 V68.3" />
+    <!-- G glyph: cyan glitch (left offset) -->
+    <path
+        android:strokeColor="#00F0FF"
+        android:strokeWidth="4.4"
+        android:strokeLineCap="round"
+        android:pathData="M40.8,46.3 H52.8 A11,11 0 0 1 52.8,68.3 H48.8 M40.8,46.3 V68.3" />
+    <!-- G glyph: white core -->
+    <path
+        android:strokeColor="#F4FBFF"
+        android:strokeWidth="4.4"
+        android:strokeLineCap="round"
+        android:pathData="M43,46.3 H55 A11,11 0 0 1 55,68.3 H51 M43,46.3 V68.3" />
+
+    <!-- Terminal prompt cursor -->
+    <path
+        android:strokeColor="#F4FBFF"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M64.5,52.5 L69,55 L64.5,57.5" />
+
+    <!-- Sensor nodes -->
+    <path
+        android:fillColor="#00F0FF"
+        android:pathData="M41.5,72.5a2.2,2.2 0 1 0 -4.4,0 a2.2,2.2 0 1 0 4.4,0" />
+    <path
+        android:fillColor="#FF2E9E"
+        android:pathData="M66.5,72.5a2.2,2.2 0 1 0 -4.4,0 a2.2,2.2 0 1 0 4.4,0" />
 </vector>

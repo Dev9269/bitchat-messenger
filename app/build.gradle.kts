@@ -6,6 +6,7 @@ plugins {
 }
 
 import java.util.Properties
+import com.android.build.gradle.internal.api.BaseVariantOutputImpl
 
 val keystoreProps = Properties().apply {
     val f = rootProject.file("keystore/keystore.properties")
@@ -20,8 +21,8 @@ android {
         applicationId = "com.bitchat"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.2.0"
+        versionCode = 8
+        versionName = "0.3.0"
     }
 
     signingConfigs {
@@ -62,6 +63,15 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+        }
+    }
+}
+
+android {
+    applicationVariants.all {
+        val variant = this
+        outputs.all {
+            (this as BaseVariantOutputImpl).outputFileName = "Ghostwire-${variant.versionName}.apk"
         }
     }
 }

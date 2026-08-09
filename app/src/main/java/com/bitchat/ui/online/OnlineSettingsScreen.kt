@@ -107,7 +107,7 @@ fun OnlineSettingsScreen(onBack: () -> Unit) {
                 value = url,
                 onValueChange = { url = it },
                 label = { Text("Firebase project ID") },
-                placeholder = { Text("my-bitchat-app") },
+                placeholder = { Text("my-ghostwire-app") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )

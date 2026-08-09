@@ -35,7 +35,7 @@ private val DarkColors = darkColorScheme(
 )
 
 @Composable
-fun BitchatTheme(
+fun GhostwireTheme(
     darkTheme: Boolean = false,
     content: @Composable () -> Unit
 ) {

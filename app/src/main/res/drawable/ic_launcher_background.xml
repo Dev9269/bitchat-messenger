@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Dark cyber base -->
+    <path
+        android:fillColor="#0A0E1F"
+        android:pathData="M0,0h108v108h-108z" />
+    <!-- Blueprint grid -->
+    <path
+        android:strokeColor="#16234A"
+        android:strokeWidth="1"
+        android:pathData="M0,18h108M0,36h108M0,54h108M0,72h108M0,90h108" />
+    <path
+        android:strokeColor="#101B3C"
+        android:strokeWidth="1"
+        android:pathData="M18,0v108M36,0v108M54,0v108M72,0v108M90,0v108" />
+    <!-- Circuit traces -->
+    <path
+        android:strokeColor="#1E2F63"
+        android:strokeWidth="1.2"
+        android:pathData="M0,99 L24,99 L33,90 L33,72 M108,9 L84,9 L75,18 M0,9 L21,9 M108,99 L87,99" />
+    <!-- Circuit nodes -->
+    <path
+        android:fillColor="#1E2F63"
+        android:pathData="M33,72a2.2,2.2 0 1 0 -4.4,0 a2.2,2.2 0 1 0 4.4,0 M75,18a2.2,2.2 0 1 0 -4.4,0 a2.2,2.2 0 1 0 4.4,0 M87,99a2.2,2.2 0 1 0 -4.4,0 a2.2,2.2 0 1 0 4.4,0" />
+</vector>

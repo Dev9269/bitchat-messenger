@@ -33,7 +33,7 @@ import com.bitchat.ui.lock.AppLock
 import com.bitchat.ui.lock.LockDialog
 import com.bitchat.ui.lock.LockScreen
 import com.bitchat.ui.online.OnlineSettingsScreen
-import com.bitchat.ui.theme.BitchatTheme
+import com.bitchat.ui.theme.GhostwireTheme
 
 sealed interface Screen {
     data object Home : Screen
@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
         isLocked = AppLock.isEnabled(applicationContext) && !AppLock.isUnlocked()
 
         setContent {
-            BitchatTheme {
+            GhostwireTheme {
                 AppContent()
             }
         }

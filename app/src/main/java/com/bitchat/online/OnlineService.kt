@@ -63,9 +63,9 @@ object OnlineService {
         val options = OnlineConfig.getFirebaseOptions(ctx) ?: return false
         return try {
             val app = try {
-                FirebaseApp.getInstance("bitchat_online")
+                FirebaseApp.getInstance("ghostwire_online")
             } catch (_: Exception) {
-                FirebaseApp.initializeApp(ctx, options, "bitchat_online")
+                FirebaseApp.initializeApp(ctx, options, "ghostwire_online")
             }
             auth = FirebaseAuth.getInstance(app)
             firestore = FirebaseFirestore.getInstance(app).apply {
