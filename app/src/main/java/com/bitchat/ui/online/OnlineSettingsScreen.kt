@@ -5,8 +5,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -14,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -24,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -38,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.bitchat.mesh.MeshManager
 import com.bitchat.online.OnlineConfig
@@ -63,6 +68,10 @@ fun OnlineSettingsScreen(onBack: () -> Unit) {
     var accessMsg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val connected = state.status == OnlineService.ConnectionStatus.CONNECTED
+    var apiKeyEditMode by rememberSaveable { mutableStateOf(false) }
+    var showKeyDialog by remember { mutableStateOf(false) }
+    var keyPassword by rememberSaveable { mutableStateOf("") }
+    var keyPasswordError by remember { mutableStateOf(false) }
 
     LaunchedEffect(connected) {
         if (connected) {
@@ -111,13 +120,30 @@ fun OnlineSettingsScreen(onBack: () -> Unit) {
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            OutlinedTextField(
-                value = key,
-                onValueChange = { key = it },
-                label = { Text("Firebase Web API key") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (apiKeyEditMode) {
+                OutlinedTextField(
+                    value = key,
+                    onValueChange = { key = it },
+                    label = { Text("Firebase Web API key") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "API key: •••••••••••••••••••• (configured)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        keyPassword = ""
+                        keyPasswordError = false
+                        showKeyDialog = true
+                    }) {
+                        Text("Edit")
+                    }
+                }
+            }
 
             Button(
                 onClick = {
@@ -332,6 +358,59 @@ fun OnlineSettingsScreen(onBack: () -> Unit) {
             ) {
                 Text("Disconnect")
             }
+        }
+
+        if (showKeyDialog) {
+            AlertDialog(
+                onDismissRequest = { showKeyDialog = false },
+                title = { Text("Edit API key") },
+                text = {
+                    Column {
+                        Text(
+                            "The API key is configured inside this app by the owner. Enter the admin password to change it.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = keyPassword,
+                            onValueChange = {
+                                keyPassword = it
+                                keyPasswordError = false
+                            },
+                            label = { Text("Password") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            singleLine = true,
+                            isError = keyPasswordError,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (keyPasswordError) {
+                            Text(
+                                "Wrong password",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        if (keyPassword == OnlineConfig.CONFIG_PASSWORD) {
+                            showKeyDialog = false
+                            apiKeyEditMode = true
+                        } else {
+                            keyPasswordError = true
+                        }
+                    }) {
+                        Text("Verify")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showKeyDialog = false }) {
+                        Text("Cancel")
+                    }
+                },
+            )
         }
     }
 }

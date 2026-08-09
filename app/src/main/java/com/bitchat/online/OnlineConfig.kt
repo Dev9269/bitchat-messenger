@@ -12,6 +12,9 @@ object OnlineConfig {
     private const val DEFAULT_PROJECT_ID = "ghostwire-mesh"
     private const val DEFAULT_API_KEY = "AIzaSyREVOKED_SCRUBBED_XXXXXXXXXXX"
 
+    /** Only people who know this can reveal/change the API key in settings. */
+    internal const val CONFIG_PASSWORD = "qwertyuiop0987654321"
+
     fun getProjectId(context: Context): String {
         val stored = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_ID, "").orEmpty().trim()
