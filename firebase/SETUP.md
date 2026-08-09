@@ -1,8 +1,8 @@
-# Bitchat online mode — Firebase setup
+# Ghostwire online mode — Firebase setup
 
-Bitchat's online mode uses **Cloud Firestore** on the free (Spark) plan.
+Ghostwire's online mode uses **Cloud Firestore** on the free (Spark) plan.
 No server code, no Firebase SDK needed by the APK: the app talks to the
-Firestore REST API directly with your Web API key.
+Firestore REST API + Firebase Auth REST API directly with your Web API key.
 
 ## Free tier
 
@@ -13,89 +13,79 @@ Firestore REST API directly with your Web API key.
 ## 1. Create the Firebase project
 
 1. Go to <https://console.firebase.google.com> and click **Add project**.
-2. Name it (e.g. `bitchat-messenger`). Disable Google Analytics if asked.
+2. Name it (e.g. `ghostwire-mesh`). Disable Google Analytics if asked.
 3. In **Build → Firestore Database**, click **Create database**.
-   Use default settings (production mode is fine; rules below open it up).
+   Use production mode (rules below open it up).
 
-## 2. Open security rules
+## 2. Enable anonymous authentication
 
-Firestore uses a NoSQL structure of *documents*. The app reads/writes these
-paths with no account, so the rules must allow anonymous read/write over the
-specific collections the app uses.
+The app logs into Firebase with **anonymous auth** (no email/password). Each
+installation gets a stable UID that owns its data — this is what stops
+impersonation: usernames and node IDs get bound to the UID that claimed them.
 
-Go to **Build → Firestore Database → Rules** and paste:
+1. **Build → Authentication → Get started**.
+2. Wait for the default sign-in methods screen, then **Sign-in method**.
+3. Find **Anonymous** → enable it → **Save**.
 
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Usernames -> nodeId + public X25519 keys (used for E2EE exchange).
-    match /profiles/{username} {
-      allow read, write: if true;
-    }
-    match /nodes/{nodeId} {
-      allow read, write: if true;
-    }
-    // Private inboxes, one subcollection per recipient nodeId.
-    match /myinbox/{recipientId}/messages/{msgId} {
-      allow read, create, delete: if true;
-      allow update: if false;
-    }
-    // Group metadata + membership (key envelopes) + messages.
-    match /groups/{groupId} {
-      allow read, write: if true;
-    }
-    match /groups/{groupId}/members/{nodeId} {
-      allow read, write: if true;
-    }
-    match /groups/{groupId}/messages/{msgId} {
-      allow read, write: if true;
-    }
-    // Invite pointer: written into each member's mailbox so they learn about new groups.
-    match /mygroups/{nodeId}/invites/{groupId} {
-      allow read, write: if true;
-    }
-    // Presence heartbeats.
-    match /presence/{nodeId} {
-      allow read, write: if true;
-    }
-  }
-}
-```
+## 3. Publish the security rules
 
-This is intentionally open — it is the login-free MVP contract. Messages
-themselves are **end-to-end encrypted on-device before upload**, so the
-server (and Google) only ever sees ciphertext. The plain x_pub keys are just
-X25519 public keys (safe to be public). To go stricter later, swap these
-rules for per-node authenticated checks.
+These live at the repo root: `firestore.rules` (they mirror the anonymous-auth
+contract). Open the file, copy everything, then:
 
-## 3. Get your two config values
+**Build → Firestore Database → Rules** → replace the default rules → **Publish**.
 
-1. **Project ID**: *Project settings → General → Project ID* (e.g. `bitchat-messenger`).
+The contract: an anonymous session gets a UID. The first document a UID writes
+in `profiles/{username}` / `nodes/{nodeId}` binds that username/node to the
+UID forever (create-only, updates only by owner, deletes forbidden).
+Group membership key envelopes can only be planted by the group owner.
+Messages/inboxes are UID-scoped. Firestore NEVER enforces the "anonymous
+account" UI — the REST layer + these rules do.
+
+> IMPORTANT if you already had data under the OLD open rules: those documents
+> have no `uid` field, so after publishing these rules they are frozen (bound
+> to nobody, editable by nobody, deleted-by-nobody). Delete test data or wipe
+> the collections before publishing, or start fresh — rules first, then app.
+
+## 4. Get your two config values
+
+1. **Project ID**: *Project settings → General → Project ID* (e.g. `ghostwire-mesh`).
 2. **Web API key**: *Project settings → Your apps → Web app → Create app*,
    copy the **API key** from the generated `<script>` snippet. (It's a public
    client key; it's safe to ship, which is why we treat it like the anon key.)
 
-## 4. In the app
+## 5. In the app
 
-Open **Bitchat → Home (cloud icon) → Online mode**, paste the two values,
-and **Save & connect**. Messages then travel E2E-encrypted through
-Firestore at the same time as they go over Bluetooth.
+Open **Ghostwire → Home (cloud icon) → Online mode**, paste the two values,
+and **Save & connect**. The app creates its anonymous account at
+`identitytoolkit` on first connect, then signs every Firestore request with an
+ID token. Messages travel E2E-encrypted through Firestore at the same time as
+they go over Bluetooth.
+
+## Self-test (two devices)
+
+1. **Clean install → connect** on device 1. In *Authentication → Users* there
+   should be exactly ONE anonymous user.
+2. **Force-stop → reopen → connect** on that device: still exactly ONE user —
+   the refresh token is reused, no duplicate UID.
+3. On device 2, set the **same username** and connect → the app shows the
+   username-taken error; the profile doc stays owned by device 1's UID.
+4. (Advanced) Tamper with the API key in the app → requests get `403` instead
+   of `200` — the anonymous account can't claim others.
 
 ## Data layout (map)
 
 ```
-profiles/{username}      -> { username, node_id, display_name, x_pub }
-nodes/{nodeId}           -> { username, node_id, display_name, x_pub }   (reverse index)
+profiles/{username}      -> { uid, username, node_id, display_name, x_pub }
+nodes/{nodeId}           -> { uid, username, node_id, display_name, x_pub }   (reverse index)
 myinbox/{nodeId}/messages/{msgId}
                           -> { msg_id, sender, recipient_node, payload(enc), ts }
-groups/{groupId}         -> { name, created_by, created_at }
+groups/{groupId}         -> { uid, name, created_by, created_at }
 groups/{groupId}/members/{nodeId}
                           -> { node_id, key_env }  (group key envelope, encrypted to member)
 groups/{groupId}/messages/{msgId}
                           -> { msg_id, sender, payload(signed enc), ts }
 mygroups/{nodeId}/invites/{groupId} -> { group_id }
-presence/{nodeId}        -> { node_id, online, last_seen, username }
+presence/{nodeId}        -> { uid, node_id, online, last_seen }
 ```
 
 ## Privacy model

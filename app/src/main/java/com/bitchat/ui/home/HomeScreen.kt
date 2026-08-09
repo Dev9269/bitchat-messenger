@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -48,18 +49,22 @@ fun HomeScreen(
     onOpenNearby: () -> Unit,
     onCreateGroup: () -> Unit,
     onOpenOnline: () -> Unit,
+    onManageLock: () -> Unit,
 ) {
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
                     Text(
-                        "Bitchat",
+                        "Ghostwire",
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 },
                 actions = {
+                    IconButton(onClick = onManageLock) {
+                        Icon(Icons.Filled.Lock, contentDescription = "App lock")
+                    }
                     IconButton(onClick = onOpenOnline) {
                         Icon(Icons.Filled.Cloud, contentDescription = "Online mode settings")
                     }

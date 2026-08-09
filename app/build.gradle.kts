@@ -5,6 +5,13 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+import java.util.Properties
+
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("keystore/keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
 android {
     namespace = "com.bitchat"
     compileSdk = 35
@@ -20,9 +27,11 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("../keystore/bitchat-release.keystore")
-            storePassword = "bitchat2026"
+            storePassword = keystoreProps.getProperty("storePassword")
+                ?: error("Missing storePassword — add keystore/keystore.properties")
             keyAlias = "bitchat"
-            keyPassword = "bitchat2026"
+            keyPassword = keystoreProps.getProperty("keyPassword")
+                ?: error("Missing keyPassword — add keystore/keystore.properties")
         }
     }
 
@@ -49,6 +58,12 @@ android {
     buildFeatures {
         compose = true
     }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -71,4 +86,14 @@ dependencies {
     implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.client.websockets)
     debugImplementation(libs.androidx.ui.tooling)
+
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.auth)
+    implementation(libs.kotlinx.coroutines.play.services)
+    implementation(libs.androidx.fragment)
+    implementation(libs.sqlcipher)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
 }

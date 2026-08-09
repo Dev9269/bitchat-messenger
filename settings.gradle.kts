@@ -23,5 +23,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Bitchat"
+rootProject.name = "Ghostwire"
 include(":app")

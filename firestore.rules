@@ -1,0 +1,143 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------------
+    // Identity documents. The invariant: the FIRST write binds the document
+    // to the writer's Firebase auth UID, and no other UID may ever take it
+    // over (update/overwrite) or delete it. Username claims are first-come
+    // first-served: once profiles/{username} exists with a bound UID, it
+    // cannot be re-claimed by anyone else.
+    // ---------------------------------------------------------------------
+
+    function isBound(uidField) {
+      // The incoming document must declare the caller's UID as its owner.
+      return request.auth != null && uidField == request.auth.uid;
+    }
+
+    match /profiles/{username} {
+      allow read: if request.auth != null;
+      // Creating a profile = claiming the username. The caller must stamp its
+      // own UID on the document; that stamp becomes immutable.
+      allow create: if isBound(request.resource.data.uid);
+      // Updating is only allowed for the UID that owns the doc, and the doc's
+      // UID may never change (prevents transferring the claim).
+      allow update: if isBound(resource.data.uid)
+                     && resource.data.uid == request.resource.data.uid;
+      // No one can delete a username claim once it exists.
+      allow delete: if false;
+    }
+
+    match /nodes/{nodeId} {
+      allow read: if request.auth != null;
+      allow create: if isBound(request.resource.data.uid);
+      allow update: if isBound(resource.data.uid)
+                     && resource.data.uid == request.resource.data.uid;
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------------------
+    // Presence: only the owning UID (bound to the nodeId) may write or delete
+    // its own presence document. Anyone authenticated may read it to render
+    // online dots.
+    // ---------------------------------------------------------------------
+
+    match /presence/{nodeId} {
+      allow read: if request.auth != null;
+      allow create: if isBound(request.resource.data.uid);
+      allow update: if isBound(resource.data.uid)
+                     && resource.data.uid == request.resource.data.uid;
+      allow delete: if isBound(resource.data.uid);
+    }
+
+    // ---------------------------------------------------------------------
+    // Inboxes. A message may be created by ANY authenticated node (anyone may
+    // write to a recipient's inbox), but it may only be read or deleted by
+    // the UID that owns the recipient nodeId. Arbitrary deletes by third
+    // parties are impossible.
+    // ---------------------------------------------------------------------
+
+    match /myinbox/{recipientId}/messages/{msgId} {
+      allow create: if request.auth != null;
+      allow read: if request.auth != null
+                  && get(/databases/$(database)/documents/nodes/$(recipientId)).data.uid == request.auth.uid;
+      allow delete: if request.auth != null
+                    && get(/databases/$(database)/documents/nodes/$(recipientId)).data.uid == request.auth.uid;
+      allow update: if false;
+    }
+
+    // ---------------------------------------------------------------------
+    // Access control (Session-style). One settings/access document holds the
+    // SHA-256 of the personal-chat master secret and the allowlist of nodeIds
+    // the owner granted personal chat to. The FIRST create binds the owner
+    // UID immutably (like username claims). Any authenticated user may read
+    // it (it only contains hashes), but only the owner may change it.
+    // ---------------------------------------------------------------------
+
+    match /settings/access {
+      allow read: if request.auth != null;
+      allow create: if isBound(request.resource.data.owner);
+      allow update: if isBound(resource.data.owner)
+                     && resource.data.owner == request.resource.data.owner;
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------------------
+    // Groups. Creation binds the group to the creator's UID. Any
+    // authenticated member can read. Member documents (key envelopes) may be
+    // created only by the group owner, except in OPEN groups (the default
+    // group) where any authenticated node may self-join with a placeholder
+    // envelope that the owner then fills in. Members may delete their own
+    // membership (leaving a group); the owner may delete anyone (kick).
+    // Messages may be created by any authenticated node (contents are E2EE +
+    // signed; tampering is caught on decrypt/verify).
+    // ---------------------------------------------------------------------
+
+    match /groups/{groupId} {
+      allow read: if request.auth != null;
+      allow create: if isBound(request.resource.data.uid);
+      allow update: if isBound(resource.data.uid)
+                     && resource.data.uid == request.resource.data.uid;
+      allow delete: if isBound(resource.data.uid);
+
+      match /members/{nodeId} {
+        allow read: if request.auth != null;
+        // Owner plants key envelopes; anyone may self-join an open group
+        // (envelope is filled in by the owner afterwards).
+        allow create: if isBound(get(/databases/$(database)/documents/groups/$(groupId)).data.uid)
+                     || (get(/databases/$(database)/documents/groups/$(groupId)).data.open == true
+                         && request.auth != null);
+        // Only the owner may replace a member's key envelope.
+        allow update: if isBound(get(/databases/$(database)/documents/groups/$(groupId)).data.uid);
+        // Owner kicks anyone; a member may leave by deleting their own doc.
+        allow delete: if isBound(get(/databases/$(database)/documents/groups/$(groupId)).data.uid)
+                     || get(/databases/$(database)/documents/nodes/$(resource.data.node_id)).data.uid == request.auth.uid;
+      }
+
+      match /messages/{msgId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null;
+        // Group message edits: any authenticated member may update the
+        // payload (contents are E2EE + signed; tampering is caught on
+        // decrypt/verify). Control docs (group delete/kick) may be
+        // cleaned up by anyone who processed them.
+        allow update: if request.auth != null;
+        allow delete: if request.auth != null && resource.data.control != null;
+      }
+    }
+
+    // ---------------------------------------------------------------------
+    // Invite mailboxes: anyone may create an invite doc in a member's
+    // mailbox, but only the member's own UID can read or delete it.
+    // ---------------------------------------------------------------------
+
+    match /mygroups/{nodeId}/invites/{groupId} {
+      allow create: if request.auth != null;
+      allow read: if request.auth != null
+                  && get(/databases/$(database)/documents/nodes/$(nodeId)).data.uid == request.auth.uid;
+      allow delete: if request.auth != null
+                    && get(/databases/$(database)/documents/nodes/$(nodeId)).data.uid == request.auth.uid;
+      allow update: if false;
+    }
+  }
+}

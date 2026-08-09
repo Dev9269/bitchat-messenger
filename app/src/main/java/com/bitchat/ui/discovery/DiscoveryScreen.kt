@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Edit
@@ -28,7 +27,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -64,13 +62,13 @@ fun DiscoveryScreen(
     foundPeers: List<PeerEntity>,
     nameError: String?,
     onSearchQuery: (String) -> Unit,
-    onOpenFoundChat: (String) -> Unit,
     onSetDisplayName: (String) -> Unit,
     onRequestPermissions: () -> Unit,
     onOpenBluetoothSettings: () -> Unit,
     onStartMesh: () -> Unit,
     onStopMesh: () -> Unit,
-    onOpenChat: (String) -> Unit,
+    personalChatUnlocked: Boolean = false,
+    onOpenChat: (String) -> Unit = {},
     onBack: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -173,9 +171,10 @@ fun DiscoveryScreen(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
-                                    FilledTonalButton(onClick = { onOpenFoundChat(peer.nodeId) }) {
-                                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
-                                        Text("Message")
+                                    if (personalChatUnlocked) {
+                                        Button(onClick = { onOpenChat(peer.nodeId) }) {
+                                            Text("Message")
+                                        }
                                     }
                                 }
                             }
@@ -195,7 +194,7 @@ fun DiscoveryScreen(
                     Card {
                         Text(
                             "Self-test OK: you can see your own advertisement, so advertising is working. " +
-                                "Other devices will appear here when they run Bitchat with the mesh started and are within range.",
+                                "Other devices will appear here when they run Ghostwire with the mesh started and are within range.",
                             modifier = Modifier.padding(16.dp),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -209,7 +208,11 @@ fun DiscoveryScreen(
                 }
             } else {
                 items(visiblePeers, key = { it.nodeId }) { peer ->
-                    PeerCard(peer, onMessage = { onOpenChat(peer.nodeId) })
+                    PeerCard(
+                        peer = peer,
+                        showMessage = personalChatUnlocked && !peer.isSelf,
+                        onMessage = { onOpenChat(peer.nodeId) },
+                    )
                 }
             }
         }
@@ -383,7 +386,7 @@ private fun StatusRow(label: String, value: String, ok: Boolean) {
 }
 
 @Composable
-private fun PeerCard(peer: Peer, onMessage: () -> Unit) {
+private fun PeerCard(peer: Peer, showMessage: Boolean = false, onMessage: () -> Unit = {}) {
     Card {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -435,13 +438,9 @@ private fun PeerCard(peer: Peer, onMessage: () -> Unit) {
                     )
                 }
             }
-            if (!peer.isSelf) {
-                FilledTonalButton(
-                    onClick = onMessage,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
-                    Text("Message")
+            if (showMessage) {
+                Button(onClick = onMessage, modifier = Modifier.fillMaxWidth()) {
+                    Text("Message ${peer.displayName}")
                 }
             }
         }
@@ -466,7 +465,7 @@ private fun EmptyStateCard() {
             )
             Text("No nearby devices", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Start the mesh on another device running Bitchat and keep it in range (roughly 10-30 m indoors).",
+                "Start the mesh on another device running Ghostwire and keep it in range (roughly 10-30 m indoors).",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -478,7 +477,7 @@ private fun EmptyStateCard() {
                     tint = OnlineGreen,
                 )
                 Text(
-                    " BLE filter is on: only Bitchat nodes appear here.",
+                    " BLE filter is on: only Ghostwire nodes appear here.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

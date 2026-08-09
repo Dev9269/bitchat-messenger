@@ -13,6 +13,7 @@ import com.bitchat.data.STATUS_FAILED
 import com.bitchat.data.STATUS_PENDING
 import com.bitchat.data.STATUS_SENT
 import com.bitchat.online.OnlineService
+import com.bitchat.security.AccessControl
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -242,6 +243,11 @@ object MeshManager {
         val clean = name.trim().take(40)
         val groupId = MeshPacket.newMsgId().hex()
         scope.launch {
+            // One group at a time: creating a new group leaves the previous one.
+            for (g in DataGraph.repository.allGroups()) {
+                OnlineService.leaveGroupRemote(g.groupId)
+                DataGraph.repository.deleteGroup(g.groupId)
+            }
             val secret = Base64.encodeToString(CryptoEngine.newGroupKey(), Base64.NO_WRAP)
             DataGraph.repository.createGroup(groupId, clean, nodeId.value)
             DataGraph.repository.setGroupSecret(groupId, secret)
@@ -281,6 +287,36 @@ object MeshManager {
             deliverToNetwork(listOf(packet))
         }
         return groupId
+    }
+
+    /** Owner-only: create the public default group every user auto-joins. */
+    fun createDefaultGroup(onDone: (Boolean, String) -> Unit = { _, _ -> }) {
+        val groupId = AccessControl.DEFAULT_GROUP_ID
+        scope.launch {
+            if (DataGraph.repository.isGroupMember(groupId, nodeId.value)) {
+                onDone(false, "You are already in the default group")
+                return@launch
+            }
+            for (g in DataGraph.repository.allGroups()) {
+                OnlineService.leaveGroupRemote(g.groupId)
+                DataGraph.repository.deleteGroup(g.groupId)
+            }
+            val secret = Base64.encodeToString(CryptoEngine.newGroupKey(), Base64.NO_WRAP)
+            DataGraph.repository.createGroup(groupId, "Ghostwire", nodeId.value)
+            DataGraph.repository.setGroupSecret(groupId, secret)
+            DataGraph.repository.addGroupMembers(groupId, listOf(nodeId.value to displayName.value))
+            val selfEnv = Base64.encodeToString(
+                CryptoEngine.wrapGroupKey(
+                    DataGraph.repository.peer(nodeId.value)?.x25519PubKey
+                        ?: CryptoEngine.x25519PublicKey(),
+                    groupId,
+                    Base64.decode(secret, Base64.NO_WRAP)
+                ),
+                Base64.NO_WRAP
+            )
+            OnlineService.pushOpenGroup(groupId, "Ghostwire", selfEnv)
+            onDone(true, "Default group created")
+        }
     }
 
     fun sendGroupText(groupId: String, text: String) {
@@ -328,6 +364,112 @@ object MeshManager {
                 ttl = MeshPacket.DEFAULT_TTL,
                 payload = it,
             )
+        }
+    }
+
+    fun deleteGroup(groupId: String) {
+        scope.launch {
+            val group = DataGraph.repository.group(groupId) ?: return@launch
+            if (group.createdByNodeId != nodeId.value) return@launch
+            val memberIds = DataGraph.repository.allGroupMemberIds(groupId)
+            DataGraph.repository.deleteGroup(groupId)
+            OnlineService.deleteGroupRemote(groupId, memberIds)
+            val info = JSONObject().put("g", groupId)
+            val packet = MeshPacket.Packet(
+                type = MeshPacket.TYPE_GROUP_DELETE,
+                msgId = MeshPacket.newMsgId(),
+                src = nodeId.value,
+                dst = MeshPacket.BROADCAST_NODE_HEX,
+                ttl = MeshPacket.DEFAULT_TTL,
+                payload = info.toString().toByteArray(Charsets.UTF_8),
+            )
+            deliverToNetwork(listOf(packet))
+        }
+    }
+
+    fun removeGroupMember(groupId: String, memberNodeId: String, onResult: (Boolean, String) -> Unit = { _, _ -> }) {
+        scope.launch {
+            val group = DataGraph.repository.group(groupId) ?: run {
+                onResult(false, "Group not found")
+                return@launch
+            }
+            if (group.createdByNodeId != nodeId.value) {
+                onResult(false, "Only the group creator can remove members")
+                return@launch
+            }
+            if (memberNodeId == nodeId.value) {
+                onResult(false, "You are the creator")
+                return@launch
+            }
+            if (!DataGraph.repository.isGroupMember(groupId, memberNodeId)) {
+                onResult(false, "Not a member")
+                return@launch
+            }
+            DataGraph.repository.removeGroupMember(groupId, memberNodeId)
+            OnlineService.kickGroupMemberRemote(groupId, memberNodeId)
+            val info = JSONObject().put("g", groupId).put("m", memberNodeId)
+            val packet = MeshPacket.Packet(
+                type = MeshPacket.TYPE_GROUP_KICK,
+                msgId = MeshPacket.newMsgId(),
+                src = nodeId.value,
+                dst = MeshPacket.BROADCAST_NODE_HEX,
+                ttl = MeshPacket.DEFAULT_TTL,
+                payload = info.toString().toByteArray(Charsets.UTF_8),
+            )
+            deliverToNetwork(listOf(packet))
+            onResult(true, "Member removed")
+        }
+    }
+
+    fun editGroupMessage(groupId: String, msgIdHex: String, newText: String) {
+        scope.launch {
+            if (newText.isBlank()) return@launch
+            DataGraph.repository.updateMessageText(msgIdHex, newText)
+            val secret = DataGraph.repository.groupSecret(groupId) ?: return@launch
+            val key = Base64.decode(secret, Base64.NO_WRAP)
+            val ciphertext = CryptoEngine.encryptGroupMessage(key, msgIdHex.hexToBytes(), newText.toByteArray(Charsets.UTF_8))
+            val signed = CryptoEngine.signBroadcast(ciphertext)
+            val signedB64 = Base64.encodeToString(signed, Base64.NO_WRAP)
+            OnlineService.sendGroupEdit(groupId, msgIdHex, signedB64)
+            val info = JSONObject().put("m", msgIdHex).put("p", signedB64)
+            val packet = MeshPacket.Packet(
+                type = MeshPacket.TYPE_GROUP_EDIT,
+                msgId = MeshPacket.newMsgId(),
+                src = nodeId.value,
+                dst = groupId,
+                ttl = MeshPacket.DEFAULT_TTL,
+                payload = info.toString().toByteArray(Charsets.UTF_8),
+            )
+            deliverToNetwork(listOf(packet))
+        }
+    }
+
+    fun receiveGroupControl(groupId: String, action: String, memberNodeId: String) {
+        scope.launch {
+            val isMember = DataGraph.repository.isGroupMember(groupId, nodeId.value)
+            when (action) {
+                "delete" -> if (isMember) DataGraph.repository.deleteGroup(groupId)
+                "kick" -> {
+                    if (!isMember) return@launch
+                    if (memberNodeId == nodeId.value) DataGraph.repository.deleteGroup(groupId)
+                    else DataGraph.repository.removeGroupMember(groupId, memberNodeId)
+                }
+            }
+        }
+    }
+
+    fun receiveOnlineGroupEdit(groupId: String, msgIdHex: String, senderNode: String, signedB64: String, ts: Long) {
+        scope.launch {
+            try {
+                if (!DataGraph.repository.isGroupMember(groupId, nodeId.value)) return@launch
+                val decoded = Base64.decode(signedB64, Base64.NO_WRAP)
+                val ciphertext = CryptoEngine.verifyBroadcast(decoded) ?: return@launch
+                val secretRaw = DataGraph.repository.groupSecret(groupId) ?: return@launch
+                val key = Base64.decode(secretRaw, Base64.NO_WRAP)
+                val plaintext = CryptoEngine.decryptGroupMessage(key, msgIdHex.hexToBytes(), ciphertext) ?: return@launch
+                DataGraph.repository.updateMessageText(msgIdHex, String(plaintext, Charsets.UTF_8))
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -392,11 +534,84 @@ object MeshManager {
         }
     }
 
-fun receiveOnlineGroupInvite(groupId: String) {
+fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, String) -> Unit = { _, _ -> }) {
+        val groupId = code.trim()
+        if (groupId.isEmpty()) {
+            onResult(false, "Room code empty")
+            return
+        }
+        scope.launch {
+            try {
+                if (DataGraph.repository.isGroupMember(groupId, nodeId.value)) {
+                    onResult(true, "Already a member")
+                    return@launch
+                }
+                // Session-style: one group at a time. Joining a non-default
+                // group always requires that group's secret code.
+                val currentGroups = DataGraph.repository.allGroups()
+                val switching = currentGroups.any { it.groupId != groupId }
+                if (groupId != AccessControl.DEFAULT_GROUP_ID) {
+                    val serverSecret = OnlineService.fetchGroupSecret(groupId)
+                    if (serverSecret != null) {
+                        val supplied = AccessControl.sha256Hex(secret ?: "")
+                        if (!AccessControl.constantTimeEquals(supplied, serverSecret)) {
+                            onResult(false, "This group is protected — enter the group secret code")
+                            return@launch
+                        }
+                    }
+                }
+                if (switching) {
+                    for (g in currentGroups) {
+                        if (g.groupId == groupId) continue
+                        OnlineService.leaveGroupRemote(g.groupId)
+                        DataGraph.repository.deleteGroup(g.groupId)
+                    }
+                }
+                OnlineService.syncGroup(groupId, onLoaded = { name, memberIds, myKeyEnv, createdBy ->
+                    scope.launch {
+                        try {
+                            if (!memberIds.contains(nodeId.value)) {
+                                onResult(false, "Group found, but you are not on the member list")
+                                return@launch
+                            }
+                            DataGraph.repository.createGroup(groupId, name, groupId)
+                            DataGraph.repository.addGroupMembers(
+                                groupId,
+                                memberIds.map { n -> n to (if (n == nodeId.value) displayName.value else NodeIdentity.displayName(n)) }
+                            )
+                            val creatorPub = OnlineService.xPubFor(createdBy)
+                            var secretOk = false
+                            if (creatorPub != null && !myKeyEnv.isNullOrEmpty()) {
+                                val env = Base64.decode(myKeyEnv, Base64.NO_WRAP)
+                                val secret = CryptoEngine.unwrapGroupKey(creatorPub, groupId, env)
+                                if (secret != null) {
+                                    DataGraph.repository.setGroupSecret(groupId, Base64.encodeToString(secret, Base64.NO_WRAP))
+                                    secretOk = true
+                                }
+                            }
+                            onResult(secretOk, if (secretOk) "Joined $name" else "Joined, waiting for group key")
+                        } catch (_: Exception) {
+                            onResult(false, "Join failed")
+                        }
+                    }
+                }, onError = { msg -> onResult(false, msg) })
+            } catch (_: Exception) {
+                onResult(false, "Room code not found")
+            }
+        }
+    }
+
+    fun receiveOnlineGroupInvite(groupId: String) {
         scope.launch {
             try {
                 if (DataGraph.repository.isGroupMember(groupId, nodeId.value)) return@launch
-                OnlineService.syncGroup(groupId) { name, memberIds, myKeyEnv, createdBy ->
+                // One group at a time: an invite to a new group leaves the old one.
+                for (g in DataGraph.repository.allGroups()) {
+                    if (g.groupId == groupId) continue
+                    OnlineService.leaveGroupRemote(g.groupId)
+                    DataGraph.repository.deleteGroup(g.groupId)
+                }
+                OnlineService.syncGroup(groupId, onLoaded = { name, memberIds, myKeyEnv, createdBy ->
                     scope.launch {
                         if (memberIds.contains(nodeId.value)) {
                             DataGraph.repository.createGroup(groupId, name, groupId)
@@ -414,7 +629,7 @@ fun receiveOnlineGroupInvite(groupId: String) {
                             }
                         }
                     }
-                }
+                })
             } catch (_: Exception) {
             }
         }
@@ -583,6 +798,18 @@ fun receiveOnlineGroupInvite(groupId: String) {
             }
             MeshPacket.TYPE_GROUP -> handleGroup(packet)
             MeshPacket.TYPE_GROUP_INFO -> handleGroupInfo(packet)
+            MeshPacket.TYPE_GROUP_DELETE -> {
+                relayIt(packet)
+                handleGroupDelete(packet)
+            }
+            MeshPacket.TYPE_GROUP_KICK -> {
+                relayIt(packet)
+                handleGroupKick(packet)
+            }
+            MeshPacket.TYPE_GROUP_EDIT -> {
+                relayIt(packet)
+                handleGroupEdit(packet)
+            }
         }
     }
 
@@ -664,7 +891,10 @@ fun receiveOnlineGroupInvite(groupId: String) {
     private fun handleHandshake(packet: MeshPacket.Packet, channel: PacketChannel) {
         scope.launch {
             if (packet.payload.size == 32) {
-                DataGraph.repository.setPeerKey(packet.src, packet.payload)
+                val existing = DataGraph.repository.peer(packet.src)?.x25519PubKey
+                if (existing == null || existing.contentEquals(packet.payload)) {
+                    DataGraph.repository.setPeerKey(packet.src, packet.payload)
+                }
             }
             val reply = MeshPacket.Packet(
                 type = MeshPacket.TYPE_HANDSHAKE,
@@ -739,6 +969,53 @@ fun receiveOnlineGroupInvite(groupId: String) {
                         }
                     }
                 }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun handleGroupDelete(packet: MeshPacket.Packet) {
+        scope.launch {
+            try {
+                val json = JSONObject(String(packet.payload, Charsets.UTF_8))
+                val groupId = json.getString("g")
+                val group = DataGraph.repository.group(groupId) ?: return@launch
+                if (group.createdByNodeId != packet.src) return@launch
+                DataGraph.repository.deleteGroup(groupId)
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun handleGroupKick(packet: MeshPacket.Packet) {
+        scope.launch {
+            try {
+                val json = JSONObject(String(packet.payload, Charsets.UTF_8))
+                val groupId = json.getString("g")
+                val member = json.getString("m")
+                val group = DataGraph.repository.group(groupId) ?: return@launch
+                if (group.createdByNodeId != packet.src) return@launch
+                if (member == nodeId.value) {
+                    DataGraph.repository.deleteGroup(groupId)
+                } else {
+                    DataGraph.repository.removeGroupMember(groupId, member)
+                    if (DataGraph.repository.allGroupMemberIds(groupId).isEmpty()) {
+                        DataGraph.repository.deleteGroup(groupId)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun handleGroupEdit(packet: MeshPacket.Packet) {
+        if (packet.dst != nodeId.value && packet.dst != MeshPacket.BROADCAST_NODE_HEX) return
+        scope.launch {
+            try {
+                val json = JSONObject(String(packet.payload, Charsets.UTF_8))
+                val msgIdHex = json.getString("m")
+                val signedB64 = json.getString("p")
+                receiveOnlineGroupEdit(packet.dst, msgIdHex, packet.src, signedB64, System.currentTimeMillis())
             } catch (_: Exception) {
             }
         }

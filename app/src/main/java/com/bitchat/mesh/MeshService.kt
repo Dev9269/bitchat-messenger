@@ -71,7 +71,7 @@ class MeshService : Service() {
             PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Bitchat mesh active")
+            .setContentTitle("Ghostwire mesh active")
             .setContentText("Advertising and scanning for nearby devices")
             .setSmallIcon(R.drawable.ic_stat_mesh)
             .setOngoing(true)

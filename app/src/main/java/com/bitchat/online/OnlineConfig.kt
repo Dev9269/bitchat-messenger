@@ -1,6 +1,7 @@
 package com.bitchat.online
 
 import android.content.Context
+import com.google.firebase.FirebaseOptions
 
 object OnlineConfig {
 
@@ -8,11 +9,20 @@ object OnlineConfig {
     private const val KEY_ID = "firebase_project_id"
     private const val KEY_API = "firebase_api_key"
 
-    fun getProjectId(context: Context): String =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_ID, "").orEmpty().trim()
+    private const val DEFAULT_PROJECT_ID = "ghostwire-mesh"
+    private const val DEFAULT_API_KEY = "AIzaSyREVOKED_SCRUBBED_XXXXXXXXXXX"
 
-    fun getApiKey(context: Context): String =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_API, "").orEmpty().trim()
+    fun getProjectId(context: Context): String {
+        val stored = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_ID, "").orEmpty().trim()
+        return stored.ifEmpty { DEFAULT_PROJECT_ID }
+    }
+
+    fun getApiKey(context: Context): String {
+        val stored = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_API, "").orEmpty().trim()
+        return stored.ifEmpty { DEFAULT_API_KEY }
+    }
 
     fun setCredentials(context: Context, projectId: String, apiKey: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
@@ -25,5 +35,18 @@ object OnlineConfig {
         val id = getProjectId(context)
         val key = getApiKey(context)
         return id.length >= 3 && key.length >= 20
+    }
+
+    fun getFirebaseOptions(context: Context): FirebaseOptions? {
+        if (!isConfigured(context)) return null
+        return try {
+            FirebaseOptions.Builder()
+                .setProjectId(getProjectId(context))
+                .setApiKey(getApiKey(context))
+                .setApplicationId("com.bitchat")
+                .build()
+        } catch (_: Exception) {
+            null
+        }
     }
 }

@@ -83,6 +83,9 @@ class Repository(private val db: AppDatabase) {
     suspend fun isGroupMember(groupId: String, nodeId: String): Boolean =
         groupDao.isMember(groupId, nodeId) != null
 
+    suspend fun allGroupMemberIds(groupId: String): List<String> =
+        groupDao.memberNodeIds(groupId)
+
     suspend fun group(groupId: String): GroupEntity? = groupDao.getGroup(groupId)
 
     suspend fun createGroup(groupId: String, name: String, createdBy: String) {
@@ -171,4 +174,26 @@ class Repository(private val db: AppDatabase) {
     }
 
     suspend fun allPending(): List<MessageEntity> = messageDao.allPending()
+
+    suspend fun deleteConversation(conversationId: String) {
+        messageDao.deleteConversation(conversationId)
+    }
+
+    suspend fun deleteMessage(msgId: String) {
+        messageDao.deleteMessage(msgId)
+    }
+
+    suspend fun updateMessageText(msgId: String, text: String) {
+        messageDao.updateText(msgId, text)
+    }
+
+    suspend fun deleteGroup(groupId: String) {
+        groupDao.deleteGroup(groupId)
+        groupDao.deleteGroupMembers(groupId)
+        messageDao.deleteConversation(groupId)
+    }
+
+    suspend fun removeGroupMember(groupId: String, nodeId: String) {
+        groupDao.deleteMember(groupId, nodeId)
+    }
 }

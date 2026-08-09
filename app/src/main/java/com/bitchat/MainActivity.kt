@@ -29,6 +29,9 @@ import com.bitchat.ui.discovery.DiscoveryViewModel
 import com.bitchat.ui.groups.GroupsScreen
 import com.bitchat.ui.home.HomeScreen
 import com.bitchat.ui.home.HomeViewModel
+import com.bitchat.ui.lock.AppLock
+import com.bitchat.ui.lock.LockDialog
+import com.bitchat.ui.lock.LockScreen
 import com.bitchat.ui.online.OnlineSettingsScreen
 import com.bitchat.ui.theme.BitchatTheme
 
@@ -45,6 +48,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var permissionLauncher: ActivityResultLauncher<Array<String>>
     private var autoRequested = false
     private var meshAutoStarted = false
+    private var isLocked by mutableStateOf(true)
 
     private val bluetoothStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -64,6 +68,8 @@ class MainActivity : ComponentActivity() {
             maybeAutoStartMesh()
         }
 
+        isLocked = AppLock.isEnabled(applicationContext) && !AppLock.isUnlocked()
+
         setContent {
             BitchatTheme {
                 AppContent()
@@ -74,7 +80,13 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun AppContent() {
         var screen by remember { mutableStateOf<Screen>(Screen.Home) }
-        BackHandler(enabled = screen !is Screen.Home) { screen = Screen.Home }
+        var showLockDialog by remember { mutableStateOf(false) }
+        BackHandler(enabled = screen !is Screen.Home || isLocked) { screen = Screen.Home }
+
+        if (isLocked) {
+            LockScreen(onUnlocked = { isLocked = false })
+            return
+        }
 
         when (val current = screen) {
             is Screen.Home -> {
@@ -86,6 +98,7 @@ class MainActivity : ComponentActivity() {
                     onOpenNearby = { screen = Screen.Nearby },
                     onCreateGroup = { screen = Screen.CreateGroup },
                     onOpenOnline = { screen = Screen.OnlineSettings },
+                    onManageLock = { showLockDialog = true },
                 )
             }
 
@@ -112,13 +125,15 @@ class MainActivity : ComponentActivity() {
                 val peers by MeshManager.peers.collectAsStateWithLifecycle()
                 val searchResults by discoveryViewModel.searchResults.collectAsStateWithLifecycle()
                 val nameError by discoveryViewModel.nameError.collectAsStateWithLifecycle()
+                val dmUnlocked by com.bitchat.security.AccessControl.dmUnlocked.collectAsStateWithLifecycle()
                 DiscoveryScreen(
                     state = meshState,
                     peers = peers.values.toList(),
                     foundPeers = searchResults,
                     nameError = nameError,
+                    personalChatUnlocked = dmUnlocked,
+                    onOpenChat = { screen = Screen.Chat(it) },
                     onSearchQuery = { discoveryViewModel.searchByName(it) },
-                    onOpenFoundChat = { screen = Screen.Chat(it) },
                     onSetDisplayName = { discoveryViewModel.saveDisplayName(it) },
                     onRequestPermissions = ::requestMissingPermissions,
                     onOpenBluetoothSettings = {
@@ -126,7 +141,6 @@ class MainActivity : ComponentActivity() {
                     },
                     onStartMesh = { MeshService.start(applicationContext) },
                     onStopMesh = { MeshService.stop(applicationContext) },
-                    onOpenChat = { screen = Screen.Chat(it) },
                     onBack = { screen = Screen.Home },
                 )
             }
@@ -135,8 +149,21 @@ class MainActivity : ComponentActivity() {
                 ChatScreen(
                     conversationId = current.conversationId,
                     onBack = { screen = Screen.Home },
+                    onDeleted = { screen = Screen.Home },
                 )
             }
+        }
+
+        if (showLockDialog) {
+            LockDialog(onDismiss = { showLockDialog = false })
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations && AppLock.isEnabled(applicationContext)) {
+            AppLock.lock()
+            isLocked = true
         }
     }
 

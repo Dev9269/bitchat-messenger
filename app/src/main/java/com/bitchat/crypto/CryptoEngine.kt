@@ -28,6 +28,7 @@ object CryptoEngine {
     private const val KEY_E_PRIV = "ed25519_priv"
     private const val KEY_E_PUB = "ed25519_pub"
     private const val HMAC_SIZE = 128
+    private const val ENC_PREFIX = "enc1:"
 
     private val random = SecureRandom()
 
@@ -39,11 +40,15 @@ object CryptoEngine {
     fun init(context: Context) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val existing = prefs.getString(KEY_X_PRIV, null)
-        if (existing != null) {
-            xPriv = X25519PrivateKeyParameters(Base64.decode(existing, Base64.NO_WRAP), 0)
-            xPub = Base64.decode(prefs.getString(KEY_X_PUB, null), Base64.NO_WRAP)
-            edPriv = Ed25519PrivateKeyParameters(Base64.decode(prefs.getString(KEY_E_PRIV, null), Base64.NO_WRAP), 0)
-            edPub = Base64.decode(prefs.getString(KEY_E_PUB, null), Base64.NO_WRAP)
+        val decoded = existing?.let { decodeStored(it) }
+        if (decoded != null) {
+            xPriv = X25519PrivateKeyParameters(decoded, 0)
+            xPub = decodeStored(prefs.getString(KEY_X_PUB, null)!!) ?: return
+            edPriv = decodeStored(prefs.getString(KEY_E_PRIV, null)!!)?.let { Ed25519PrivateKeyParameters(it, 0) } ?: return
+            edPub = decodeStored(prefs.getString(KEY_E_PUB, null)!!) ?: return
+            if (!existing!!.startsWith(ENC_PREFIX)) {
+                writeEncrypted(prefs)
+            }
         } else {
             val xgen = X25519KeyPairGenerator()
             xgen.init(X25519KeyGenerationParameters(random))
@@ -57,14 +62,28 @@ object CryptoEngine {
             edPriv = epair.private as Ed25519PrivateKeyParameters
             edPub = (epair.public as Ed25519PublicKeyParameters).encoded
 
-            prefs.edit()
-                .putString(KEY_X_PRIV, Base64.encodeToString(xPriv!!.encoded, Base64.NO_WRAP))
-                .putString(KEY_X_PUB, Base64.encodeToString(xPub, Base64.NO_WRAP))
-                .putString(KEY_E_PRIV, Base64.encodeToString(edPriv!!.encoded, Base64.NO_WRAP))
-                .putString(KEY_E_PUB, Base64.encodeToString(edPub, Base64.NO_WRAP))
-                .apply()
+            writeEncrypted(prefs)
         }
     }
+
+    private fun writeEncrypted(prefs: android.content.SharedPreferences) {
+        prefs.edit()
+            .putString(KEY_X_PRIV, encodeStored(xPriv!!.encoded))
+            .putString(KEY_X_PUB, encodeStored(xPub))
+            .putString(KEY_E_PRIV, encodeStored(edPriv!!.encoded))
+            .putString(KEY_E_PUB, encodeStored(edPub))
+            .apply()
+    }
+
+    private fun encodeStored(blob: ByteArray): String =
+        ENC_PREFIX + Base64.encodeToString(KeystoreVault.encrypt(blob), Base64.NO_WRAP)
+
+    private fun decodeStored(value: String): ByteArray? =
+        if (value.startsWith(ENC_PREFIX)) {
+            KeystoreVault.decrypt(Base64.decode(value.removePrefix(ENC_PREFIX), Base64.NO_WRAP))
+        } else {
+            Base64.decode(value, Base64.NO_WRAP)
+        }
 
     fun x25519PublicKey(): ByteArray = xPub
 

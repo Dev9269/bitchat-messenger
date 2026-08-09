@@ -1,4 +1,4 @@
-# Bitchat — Offline BLE Mesh Messenger
+# Ghostwire — Anonymous Wireless Mesh Messenger
 
 Offline, decentralized peer-to-peer messaging over Bluetooth Low Energy. No internet,
 no server, no Google Play Services. Designed for small trusted groups who want
@@ -18,13 +18,19 @@ anonymity and full control of their network.
   loop flushes queues every 8 s.
 - **End-to-end encryption (DMs)** — X25519 key exchange on first contact, per-message
   key via HKDF-SHA256, ChaCha20-Poly1305 AEAD. Intermediaries can relay but never
-  read. (MVP caveat: keys are exchanged in the clear on first contact — a MITM
-  attacker present at first contact could impersonate. A Noise-style handshake with
-  identity keys is the next hardening step.)
+  read. Keys are pinned after first contact (TOFU): a node that already knows a
+  peer's key refuses a *different* key from that peer, so later key swaps (MITM)
+  are rejected. Residual caveat: an attacker present at the very first contact could
+  still impersonate — a Noise-style handshake with identity keys is the next
+  hardening step.
 - **Signed public channel** — broadcasts are Ed25519-signed (not encrypted) and flood
   the mesh. Verified before display.
 - **Persistence** — Room database keeps chat history, peer keys, and delivery status
-  across restarts. Keys are stored locally, `allowBackup` is off.
+  across restarts. The database is encrypted at rest (SQLCipher), private key
+  material is stored wrapped under an Android Keystore AES key, and `allowBackup`
+  is off.
+- **Optional PIN lock** — an app-open PIN (PBKDF2-hashed with salt) can be set from
+  the Home screen; the app re-locks when backgrounded.
 - **Foreground service** keeps scanning/advertising/GATT alive with a notification.
 
 ## Project structure
@@ -92,8 +98,9 @@ Android 14+ additionally requires `FOREGROUND_SERVICE_CONNECTED_DEVICE`.
 
 ## Known limitations / next steps
 
-- First-contact key exchange is MITM-able (needs a Noise-style handshake with identity
-  keys, or QR code pairing).
+- First-contact key exchange is MITM-able; keys are pinned (TOFU) after first contact,
+  so only the initial pairing window is exposed. A Noise-style handshake with
+  identity keys, or QR code pairing, would close it fully.
 - BLE scanning pauses with screen off; a wake-lock option would improve background
   delivery at a battery cost.
 - Long messages (> ~1.5 KB) are truncated at the UI; MTU negotiation is per-link.

@@ -19,6 +19,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -87,6 +88,50 @@ fun GroupsScreen(
                 label = { Text("Group name") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+
+            var roomCode by rememberSaveable { mutableStateOf("") }
+            var groupSecret by rememberSaveable { mutableStateOf("") }
+            OutlinedTextField(
+                value = roomCode,
+                onValueChange = { if (it.length <= 40) roomCode = it },
+                label = { Text("Join a group — enter room code") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = groupSecret,
+                onValueChange = { if (it.length <= 40) groupSecret = it },
+                label = { Text("Group secret (only if the group is protected)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            )
+            val joinMsg = viewModel.joinMessage.collectAsStateWithLifecycle().value
+            if (joinMsg != null) {
+                Text(
+                    joinMsg,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            Button(
+                onClick = {
+                    viewModel.clearJoinMessage()
+                    viewModel.joinByCode(roomCode, groupSecret)
+                },
+                enabled = roomCode.isNotBlank(),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            ) {
+                Text("Join with code")
+            }
+            Text(
+                "One group at a time: joining a new group replaces the current one. Protected groups need their secret code.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
             )
 
             Text(

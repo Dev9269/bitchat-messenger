@@ -49,6 +49,15 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE outbound = 1 AND deliveryStatus IN (0, 1)")
     suspend fun allPending(): List<MessageEntity>
 
+    @Query("DELETE FROM messages WHERE conversationId = :conversationId")
+    suspend fun deleteConversation(conversationId: String)
+
+    @Query("DELETE FROM messages WHERE msgId = :msgId")
+    suspend fun deleteMessage(msgId: String)
+
+    @Query("UPDATE messages SET text = :text WHERE msgId = :msgId")
+    suspend fun updateText(msgId: String, text: String)
+
     @Query("""
         SELECT m.conversationId AS conversationId, m.text AS lastText, m.timestamp AS lastTs,
                p.displayName AS peerTitle, g.name AS groupTitle, m.broadcast AS broadcast
@@ -111,4 +120,13 @@ interface GroupDao {
 
     @Query("UPDATE group_members SET keyEnvB64 = :keyEnvB64 WHERE groupId = :groupId AND nodeId = :nodeId")
     suspend fun setMemberKey(groupId: String, nodeId: String, keyEnvB64: String)
+
+    @Query("DELETE FROM groups WHERE groupId = :groupId")
+    suspend fun deleteGroup(groupId: String)
+
+    @Query("DELETE FROM group_members WHERE groupId = :groupId")
+    suspend fun deleteGroupMembers(groupId: String)
+
+    @Query("DELETE FROM group_members WHERE groupId = :groupId AND nodeId = :nodeId")
+    suspend fun deleteMember(groupId: String, nodeId: String)
 }

@@ -15,6 +15,9 @@ object MeshPacket {
     const val TYPE_ACK = 4
     const val TYPE_GROUP = 5
     const val TYPE_GROUP_INFO = 6
+    const val TYPE_GROUP_DELETE = 7
+    const val TYPE_GROUP_KICK = 8
+    const val TYPE_GROUP_EDIT = 9
 
     const val DEFAULT_TTL = 5
     const val MAX_PACKET_BYTES = 620
