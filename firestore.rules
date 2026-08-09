@@ -120,9 +120,11 @@ service cloud.firestore {
         // Group message edits: any authenticated member may update the
         // payload (contents are E2EE + signed; tampering is caught on
         // decrypt/verify). Control docs (group delete/kick) may be
-        // cleaned up by anyone who processed them.
+        // cleaned up by anyone who processed them. Any member may delete
+        // (purge) a message doc — contents are ciphertext, so deletion
+        // only affects the ephemeral mailbox, never device history.
         allow update: if request.auth != null;
-        allow delete: if request.auth != null && resource.data.control != null;
+        allow delete: if request.auth != null;
       }
     }
 

@@ -28,6 +28,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
 
+/** Mailbox time-to-live: undelivered server envelopes are purged 24h after they were created. */
+internal const val MAILBOX_TTL_MS = 24L * 60 * 60 * 1000
+
+/** True when a server-side envelope (ts = creation time) is older than the 24h mailbox TTL. */
+internal fun isMailboxExpired(
+    ts: Long,
+    now: Long,
+    ttlMs: Long = MAILBOX_TTL_MS
+): Boolean = ts > 0 && now - ts >= ttlMs
+
 object OnlineService {
 
     enum class ConnectionStatus { DISCONNECTED, CONNECTING, CONNECTED, ERROR }
@@ -46,6 +56,7 @@ object OnlineService {
     private var auth: FirebaseAuth? = null
     private var sessionJob: Job? = null
     private var heartbeatJob: Job? = null
+    private var sweepJob: Job? = null
     private val listeners = mutableListOf<ListenerRegistration>()
     
     private var myNode: String = ""
@@ -162,6 +173,17 @@ object OnlineService {
             heartbeatJob?.cancel()
             heartbeatJob = scope.launch { heartbeatLoop() }
 
+            // Step 4: purge server envelopes older than 24h (mailbox only —
+            // device history is never touched).
+            sweepJob?.cancel()
+            sweepJob = scope.launch {
+                sweepExpiredMailbox()
+                while (true) {
+                    delay(MAILBOX_TTL_MS / 40) // ~36 minutes
+                    sweepExpiredMailbox()
+                }
+            }
+
         } catch (e: Exception) {
             _state.value = UiState(ConnectionStatus.ERROR, myUsername, e.message ?: "Connection failed")
         }
@@ -239,6 +261,35 @@ object OnlineService {
                 if (!watchedGroups.add(group.groupId)) continue
                 listeners.add(groupMessagesListener(db, group.groupId))
             }
+        }
+    }
+
+    private suspend fun sweepExpiredMailbox() {
+        val db = firestore ?: return
+        if (myNode.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val cutoff = now - MAILBOX_TTL_MS
+        try {
+            // 1) My own DM inbox: undelivered envelopes older than 24h.
+            db.collection("myinbox").document(myNode).collection("messages")
+                .whereLessThan("ts", cutoff)
+                .get().await()
+                .forEach { it.reference.delete() }
+
+            // 2) Group message mailboxes for groups I belong to.
+            for (group in DataGraph.repository.allGroups()) {
+                db.collection("groups").document(group.groupId).collection("messages")
+                    .whereLessThan("ts", cutoff)
+                    .get().await()
+                    .forEach { it.reference.delete() }
+            }
+
+            // 3) My invite mailbox.
+            db.collection("mygroups").document(myNode).collection("invites")
+                .whereLessThan("ts", cutoff)
+                .get().await()
+                .forEach { it.reference.delete() }
+        } catch (_: Exception) {
         }
     }
 
@@ -441,7 +492,10 @@ object OnlineService {
                 
                 for (member in memberNodeIds) {
                     db.collection("mygroups").document(member).collection("invites").document(groupId)
-                        .set(mapOf("group_id" to groupId))
+                        .set(mapOf(
+                            "group_id" to groupId,
+                            "ts" to System.currentTimeMillis()
+                        ))
                     
                     val envelopeB64 = keyEnvelopes[member]
                     if (envelopeB64 != null) {

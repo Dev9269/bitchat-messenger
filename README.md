@@ -25,10 +25,14 @@ anonymity and full control of their network.
   hardening step.
 - **Signed public channel** — broadcasts are Ed25519-signed (not encrypted) and flood
   the mesh. Verified before display.
-- **Persistence** — Room database keeps chat history, peer keys, and delivery status
+- **Persistence** - Room database keeps chat history, peer keys, and delivery status
   across restarts. The database is encrypted at rest (SQLCipher), private key
   material is stored wrapped under an Android Keystore AES key, and `allowBackup`
   is off.
+- **Ephemeral online mailbox** - the cloud relay only holds *undelivered* envelopes
+  (ciphertext) and purges everything older than 24 hours. Chat history lives purely
+  on devices: nothing is ever deleted from a phone, and the server never accumulates
+  data, keeping the free tier viable for the lifetime of the app.
 - **Optional PIN lock** — an app-open PIN (PBKDF2-hashed with salt) can be set from
   the Home screen; the app re-locks when backgrounded.
 - **Foreground service** keeps scanning/advertising/GATT alive with a notification.
