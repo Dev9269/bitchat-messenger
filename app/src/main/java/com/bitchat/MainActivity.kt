@@ -20,9 +20,11 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.bitchat.crypto.Recovery
 import com.bitchat.mesh.MeshManager
 import com.bitchat.mesh.MeshService
 import com.bitchat.mesh.PermissionRequirements
+import com.bitchat.ui.account.AccountGate
 import com.bitchat.ui.chat.ChatScreen
 import com.bitchat.ui.discovery.DiscoveryScreen
 import com.bitchat.ui.discovery.DiscoveryViewModel
@@ -81,10 +83,21 @@ class MainActivity : ComponentActivity() {
     private fun AppContent() {
         var screen by remember { mutableStateOf<Screen>(Screen.Home) }
         var showLockDialog by remember { mutableStateOf(false) }
+        var showAccountGate by remember {
+            mutableStateOf(
+                !Recovery.introDone(applicationContext) &&
+                    Recovery.getSeed(applicationContext) != null
+            )
+        }
         BackHandler(enabled = screen !is Screen.Home || isLocked) { screen = Screen.Home }
 
         if (isLocked) {
             LockScreen(onUnlocked = { isLocked = false })
+            return
+        }
+
+        if (showAccountGate) {
+            AccountGate(onDone = { showAccountGate = false })
             return
         }
 

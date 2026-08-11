@@ -41,7 +41,14 @@ object CryptoEngine {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val existing = prefs.getString(KEY_X_PRIV, null)
         val decoded = existing?.let { decodeStored(it) }
-        if (decoded != null) {
+        val seed = Recovery.getSeed(context)
+        if (decoded == null && seed == null) {
+            // Fresh install: generate the recovery seed now; the identity
+            // derives from it (0.4.0). Legacy 0.3.x installs keep random keys.
+            applySeed(Recovery.createSeed(context), prefs)
+        } else if (seed != null && decoded == null) {
+            applySeed(seed, prefs)
+        } else if (decoded != null) {
             xPriv = X25519PrivateKeyParameters(decoded, 0)
             xPub = decodeStored(prefs.getString(KEY_X_PUB, null)!!) ?: return
             edPriv = decodeStored(prefs.getString(KEY_E_PRIV, null)!!)?.let { Ed25519PrivateKeyParameters(it, 0) } ?: return
@@ -64,6 +71,33 @@ object CryptoEngine {
 
             writeEncrypted(prefs)
         }
+    }
+
+    /**
+     * Re-derives both keypairs from a recovery seed (account restore).
+     * Deterministic: the same seed always yields the same identity.
+     */
+    fun initFromSeed(context: Context, seed: ByteArray) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        applySeed(seed, prefs)
+    }
+
+    private fun applySeed(seed: ByteArray, prefs: android.content.SharedPreferences) {
+        val (x, e) = deriveKeysFromSeed(seed)
+        val xPrivKey = X25519PrivateKeyParameters(x, 0)
+        val ePrivKey = Ed25519PrivateKeyParameters(e, 0)
+        xPriv = xPrivKey
+        xPub = xPrivKey.generatePublicKey().encoded
+        edPriv = ePrivKey
+        edPub = ePrivKey.generatePublicKey().encoded
+        writeEncrypted(prefs)
+    }
+
+    /** x25519 + ed25519 private scalars, derived via HKDF with fixed labels. */
+    internal fun deriveKeysFromSeed(seed: ByteArray): Pair<ByteArray, ByteArray> {
+        val x = deriveKey(seed, "bitchat:recovery:x".toByteArray(Charsets.UTF_8))
+        val e = deriveKey(seed, "bitchat:recovery:e".toByteArray(Charsets.UTF_8))
+        return X25519PrivateKeyParameters(x, 0).encoded to Ed25519PrivateKeyParameters(e, 0).encoded
     }
 
     private fun writeEncrypted(prefs: android.content.SharedPreferences) {

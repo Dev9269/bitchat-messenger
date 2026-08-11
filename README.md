@@ -35,6 +35,11 @@ anonymity and full control of their network.
   data, keeping the free tier viable for the lifetime of the app.
 - **Optional PIN lock** — an app-open PIN (PBKDF2-hashed with salt) can be set from
   the Home screen; the app re-locks when backgrounded.
+- **Account recovery (0.4.0)** — on first launch the app derives its identity (node
+  id + X25519/Ed25519 keys) from a seed and shows a 30-character checksummed recovery
+  key exactly once. Re-entering that key on any phone restores the same identity,
+  keys and local history — no server involved. Possession of the key is possession
+  of the account.
 - **Foreground service** keeps scanning/advertising/GATT alive with a notification.
 
 ## Project structure
@@ -111,3 +116,6 @@ Android 14+ additionally requires `FOREGROUND_SERVICE_CONNECTED_DEVICE`.
 - Relay loops are bounded by TTL, not routing tables; fine for small groups, not for
   large networks.
 - No read receipts; delivery = ACK from the final recipient.
+- Online usernames are claimed once per install: Firestore rules cannot verify
+  recovery-key possession, so a restored install keeps its mesh identity but must
+  pick a fresh online username (the old one stays bound to the old device).

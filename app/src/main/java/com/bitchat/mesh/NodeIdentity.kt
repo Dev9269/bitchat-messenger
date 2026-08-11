@@ -1,6 +1,7 @@
 package com.bitchat.mesh
 
 import android.content.Context
+import com.bitchat.crypto.Recovery
 import java.security.SecureRandom
 
 object NodeIdentity {
@@ -12,11 +13,24 @@ object NodeIdentity {
     fun getNodeId(context: Context): String {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.getString(KEY_NODE_ID, null)?.let { return it }
-        val bytes = ByteArray(MeshConstants.NODE_ID_LENGTH)
-        SecureRandom().nextBytes(bytes)
-        val id = bytes.toHex()
+        val seed = Recovery.getSeed(context)
+        val id = if (seed != null) {
+            Recovery.deriveNodeId(seed)
+        } else {
+            val bytes = ByteArray(MeshConstants.NODE_ID_LENGTH)
+            SecureRandom().nextBytes(bytes)
+            bytes.toHex()
+        }
         prefs.edit().putString(KEY_NODE_ID, id).apply()
         return id
+    }
+
+    /** Drop the cached id so [getNodeId] re-derives it from the recovery seed. */
+    fun clearNodeId(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_NODE_ID)
+            .apply()
     }
 
     fun getDisplayName(context: Context, nodeId: String): String {

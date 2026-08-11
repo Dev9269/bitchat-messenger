@@ -145,6 +145,17 @@ object OnlineService {
             if (profileDoc.exists()) {
                 val owner = profileDoc.getString("node_id")
                 val ownerUid = profileDoc.getString("uid")
+                if (owner == myNode && ownerUid != myUid) {
+                    // Same identity (restored from recovery key) but a different
+                    // anonymous session UID: Firestore rules bind the username to
+                    // the claiming UID and cannot verify key possession, so the
+                    // old claim stays with the old device. Pick a fresh username.
+                    _state.value = UiState(
+                        ConnectionStatus.ERROR, myUsername,
+                        "Username locked to the previous install of this identity. Choose a new username."
+                    )
+                    return
+                }
                 if (owner != myNode && ownerUid != myUid) {
                     _state.value = UiState(ConnectionStatus.ERROR, myUsername, "Username taken.")
                     return

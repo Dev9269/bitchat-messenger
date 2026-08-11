@@ -76,9 +76,14 @@ object MeshManager {
 
     fun init(context: Context) {
         appContext = context.applicationContext
+        refreshIdentity(context)
+        refreshRuntimeState(context)
+    }
+
+    /** Re-load node id + display name (after an account restore). */
+    fun refreshIdentity(context: Context) {
         nodeId.value = NodeIdentity.getNodeId(context)
         displayName.value = NodeIdentity.getDisplayName(context, nodeId.value)
-        refreshRuntimeState(context)
     }
 
     suspend fun setDisplayName(name: String): Boolean {
