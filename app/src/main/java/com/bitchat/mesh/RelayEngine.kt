@@ -42,6 +42,11 @@ class RelayEngine {
         return true
     }
 
+    fun fragmentKey(packet: MeshPacket.Packet): String {
+        val idx = if (packet.payload.size >= 2) (packet.payload[1].toInt() and 0xFF) else 0
+        return packet.msgId.hex() + "/" + idx
+    }
+
     fun addFragment(packet: MeshPacket.Packet): ByteArray? {
         if (packet.payload.size < 2) return null
         val total = packet.payload[0].toInt() and 0xFF
@@ -55,8 +60,8 @@ class RelayEngine {
     }
 
     fun cache(dst: String, bytes: ByteArray) {
-        val msgIdHex = MeshPacket.decode(bytes)?.msgId?.hex() ?: return
-        storeForward.getOrPut(dst) { HashMap() }[msgIdHex] = System.currentTimeMillis() to bytes
+        val packet = MeshPacket.decode(bytes) ?: return
+        storeForward.getOrPut(dst) { HashMap() }[fragmentKey(packet)] = System.currentTimeMillis() to bytes
     }
 
     fun takeFor(dst: String): List<ByteArray> =

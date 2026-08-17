@@ -705,7 +705,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
     private suspend fun deliverToNetwork(packets: List<MeshPacket.Packet>): Boolean {
         if (packets.isEmpty()) return false
         for (packet in packets) {
-            relay.markSeen(packet.msgId.hex())
+            relay.markSeen(relay.fragmentKey(packet))
         }
         val online = peers.value.values.filter { it.isOnline && !it.isSelf }
         if (online.isEmpty()) return false
@@ -821,7 +821,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
     private fun handleDirect(packet: MeshPacket.Packet, channel: PacketChannel) {
         val msgIdHex = packet.msgId.hex()
         if (packet.dst == nodeId.value) {
-            val isNew = relay.isNew(msgIdHex)
+            val isNew = relay.isNew(relay.fragmentKey(packet))
             if (isNew) {
                 val assembled = relay.addFragment(packet)
                 if (assembled != null) {
@@ -866,15 +866,15 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
             )
             channel.send(MeshPacket.encode(ack))
         } else {
-            if (relay.isNew(msgIdHex)) relayIt(packet)
+            if (relay.isNew(relay.fragmentKey(packet))) relayIt(packet)
         }
     }
 
     private fun handleBroadcast(packet: MeshPacket.Packet) {
         val msgIdHex = packet.msgId.hex()
-        if (!relay.isNew(msgIdHex)) return
-        val assembled = relay.addFragment(packet) ?: return
+        if (!relay.isNew(relay.fragmentKey(packet))) return
         relayIt(packet)
+        val assembled = relay.addFragment(packet) ?: return
         scope.launch {
             val text = CryptoEngine.verifyBroadcast(assembled) ?: return@launch
             DataGraph.repository.insertMessage(
@@ -916,7 +916,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
 
     private fun handleGroup(packet: MeshPacket.Packet) {
         val msgIdHex = packet.msgId.hex()
-        if (!relay.isNew(msgIdHex)) return
+        if (!relay.isNew(relay.fragmentKey(packet))) return
         relayIt(packet)
         scope.launch {
             if (!DataGraph.repository.isGroupMember(packet.dst, nodeId.value)) return@launch
@@ -944,7 +944,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
 
     private fun handleGroupInfo(packet: MeshPacket.Packet) {
         val msgIdHex = packet.msgId.hex()
-        if (!relay.isNew(msgIdHex)) return
+        if (!relay.isNew(relay.fragmentKey(packet))) return
         relayIt(packet)
         scope.launch {
             try {
