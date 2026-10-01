@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Groups
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.filled.Radar
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Button
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -44,11 +46,13 @@ import com.bitchat.ui.theme.LocalSemanticColors
 @Composable
 fun HomeScreen(
     conversations: List<Conversation>,
+    meshState: HomeMeshState,
     onOpenChat: (String) -> Unit,
     onOpenNearby: () -> Unit,
     onCreateGroup: () -> Unit,
     onOpenOnline: () -> Unit,
     onManageLock: () -> Unit,
+    onStartMesh: () -> Unit,
 ) {
     val semanticColors = LocalSemanticColors.current
 
@@ -88,35 +92,117 @@ fun HomeScreen(
             }
         }
     ) { padding ->
-        if (conversations.isEmpty()) {
-            Box(
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            MeshStatusCard(
+                state = meshState,
+                onStartMesh = onStartMesh,
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+
+            if (conversations.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "No conversations yet",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            "Use the radar button to find nearby devices.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(conversations, key = { it.conversationId }) { conversation ->
+                        ConversationRow(conversation, onClick = { onOpenChat(conversation.conversationId) })
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MeshStatusCard(
+    state: HomeMeshState,
+    onStartMesh: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val semanticColors = LocalSemanticColors.current
+    val peerLabel = if (state.livePeerCount == 1) "peer" else "peers"
+
+    Card(modifier = modifier) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Filled.Bluetooth,
+                    contentDescription = null,
+                    tint = if (state.isRunning) semanticColors.online else semanticColors.offline,
+                    modifier = Modifier.size(24.dp),
+                )
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 12.dp),
+                ) {
                     Text(
-                        "No conversations yet",
+                        if (state.isRunning) "Mesh running" else "Mesh stopped — tap to start",
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Text(
-                        "Use the radar button to find nearby devices.",
+                        "${state.livePeerCount} live $peerLabel nearby",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(conversations, key = { it.conversationId }) { conversation ->
-                    ConversationRow(conversation, onClick = { onOpenChat(conversation.conversationId) })
+
+            Text(
+                "Bluetooth: ${if (state.bluetoothEnabled) "On" else "Off"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (state.bluetoothEnabled) semanticColors.online else semanticColors.warning,
+            )
+            Text(
+                "Permissions: ${if (state.permissionsGranted) "Granted" else "Required"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (state.permissionsGranted) semanticColors.verified else semanticColors.warning,
+            )
+
+            state.statusError?.let { error ->
+                Text(
+                    error,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = semanticColors.warning,
+                )
+            }
+
+            if (!state.isRunning) {
+                Button(onClick = onStartMesh) {
+                    Text("Tap to start")
                 }
             }
         }

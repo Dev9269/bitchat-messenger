@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var permissionLauncher: ActivityResultLauncher<Array<String>>
     private var autoRequested = false
     private var meshAutoStarted = false
+    private var pendingHomeMeshStart = false
     private var isLocked by mutableStateOf(true)
 
     private val bluetoothStateReceiver = object : BroadcastReceiver() {
@@ -67,7 +68,12 @@ class MainActivity : ComponentActivity() {
             ActivityResultContracts.RequestMultiplePermissions()
         ) {
             MeshManager.refreshRuntimeState(applicationContext)
-            maybeAutoStartMesh()
+            if (pendingHomeMeshStart && PermissionRequirements.allGranted(applicationContext)) {
+                startMeshFromHome()
+            } else {
+                pendingHomeMeshStart = false
+                maybeAutoStartMesh()
+            }
         }
 
         isLocked = AppLock.isEnabled(applicationContext) && !AppLock.isUnlocked()
@@ -105,13 +111,16 @@ class MainActivity : ComponentActivity() {
             is Screen.Home -> {
                 val homeViewModel: HomeViewModel = viewModel()
                 val conversations by homeViewModel.conversations.collectAsStateWithLifecycle()
+                val meshState by homeViewModel.meshState.collectAsStateWithLifecycle()
                 HomeScreen(
                     conversations = conversations,
+                    meshState = meshState,
                     onOpenChat = { screen = Screen.Chat(it) },
                     onOpenNearby = { screen = Screen.Nearby },
                     onCreateGroup = { screen = Screen.CreateGroup },
                     onOpenOnline = { screen = Screen.OnlineSettings },
                     onManageLock = { showLockDialog = true },
+                    onStartMesh = ::startMeshFromHome,
                 )
             }
 
@@ -183,6 +192,13 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         MeshManager.refreshRuntimeState(this)
+        if (
+            pendingHomeMeshStart &&
+            PermissionRequirements.allGranted(this) &&
+            MeshManager.bluetoothEnabled.value
+        ) {
+            startMeshService()
+        }
         ContextCompat.registerReceiver(
             this,
             bluetoothStateReceiver,
@@ -213,6 +229,30 @@ class MainActivity : ComponentActivity() {
         if (meshAutoStarted) return
         if (!PermissionRequirements.allGranted(this)) return
         if (!MeshManager.bluetoothEnabled.value) return
+        meshAutoStarted = true
+        MeshService.start(applicationContext)
+    }
+
+    private fun startMeshFromHome() {
+        val missing = PermissionRequirements.missingPermissions(this)
+        if (missing.isNotEmpty()) {
+            pendingHomeMeshStart = true
+            permissionLauncher.launch(missing)
+            return
+        }
+
+        MeshManager.refreshRuntimeState(this)
+        if (!MeshManager.bluetoothEnabled.value) {
+            pendingHomeMeshStart = true
+            startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+            return
+        }
+
+        startMeshService()
+    }
+
+    private fun startMeshService() {
+        pendingHomeMeshStart = false
         meshAutoStarted = true
         MeshService.start(applicationContext)
     }
