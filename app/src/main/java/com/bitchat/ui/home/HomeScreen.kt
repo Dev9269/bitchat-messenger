@@ -20,10 +20,10 @@ import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Radar
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Button
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bitchat.data.Conversation
@@ -67,6 +68,9 @@ fun HomeScreen(
                     )
                 },
                 actions = {
+                    IconButton(onClick = onCreateGroup) {
+                        Icon(Icons.Filled.GroupAdd, contentDescription = "Create group")
+                    }
                     IconButton(onClick = onManageLock) {
                         Icon(Icons.Filled.Lock, contentDescription = "App lock")
                     }
@@ -80,15 +84,8 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                FloatingActionButton(onClick = onCreateGroup) {
-                    Icon(Icons.Filled.GroupAdd, contentDescription = "Create group")
-                }
-                FloatingActionButton(onClick = onOpenNearby) {
-                    Icon(Icons.Filled.Radar, contentDescription = "Find nearby devices")
-                }
+            FloatingActionButton(onClick = onOpenNearby) {
+                Icon(Icons.Filled.Radar, contentDescription = "Find nearby devices")
             }
         }
     ) { padding ->
@@ -112,16 +109,30 @@ fun HomeScreen(
                         .fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Radar,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(56.dp),
+                        )
                         Text(
                             "No conversations yet",
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Text(
-                            "Use the radar button to find nearby devices.",
+                            "Find nearby devices over Bluetooth to start a conversation.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
                         )
+                        Button(onClick = onOpenNearby) {
+                            Text("Find nearby devices")
+                        }
                     }
                 }
             } else {
@@ -129,7 +140,12 @@ fun HomeScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp),
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 4.dp,
+                        bottom = 104.dp,
+                    ),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(conversations, key = { it.conversationId }) { conversation ->
