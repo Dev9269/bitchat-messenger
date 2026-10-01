@@ -38,8 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bitchat.data.Conversation
 import com.bitchat.ui.formatTime
-
-private val OnlineGreen = androidx.compose.ui.graphics.Color(0xFF22C55E)
+import com.bitchat.ui.theme.LocalSemanticColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,6 +50,8 @@ fun HomeScreen(
     onOpenOnline: () -> Unit,
     onManageLock: () -> Unit,
 ) {
+    val semanticColors = LocalSemanticColors.current
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -179,7 +180,7 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
                                 .padding(start = 6.dp)
                                 .size(8.dp)
                                 .clip(CircleShape)
-                                .background(if (conversation.online) OnlineGreen else MaterialTheme.colorScheme.outlineVariant)
+                                .background(if (conversation.online) semanticColors.online else semanticColors.offline)
                         )
                     }
                 }
