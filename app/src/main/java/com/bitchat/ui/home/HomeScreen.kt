@@ -285,6 +285,12 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
                                 .background(if (conversation.online) semanticColors.online else semanticColors.offline)
                         )
                     }
+                    Text(
+                        formatTime(conversation.lastTs),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
                 }
                 Text(
                     conversation.lastText,
@@ -294,11 +300,6 @@ private fun ConversationRow(conversation: Conversation, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                formatTime(conversation.lastTs),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
