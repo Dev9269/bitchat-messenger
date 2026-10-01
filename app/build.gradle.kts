@@ -8,10 +8,16 @@ plugins {
 import java.util.Properties
 import com.android.build.gradle.internal.api.BaseVariantOutputImpl
 
+val keystorePropsFile = rootProject.file("keystore/keystore.properties")
+val keystoreFile = rootProject.file("keystore/bitchat-release.keystore")
 val keystoreProps = Properties().apply {
-    val f = rootProject.file("keystore/keystore.properties")
-    if (f.exists()) f.inputStream().use { load(it) }
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
 }
+
+val hasReleaseKeystore = keystorePropsFile.exists() &&
+        keystoreFile.exists() &&
+        !keystoreProps.getProperty("storePassword").isNullOrBlank() &&
+        !keystoreProps.getProperty("keyPassword").isNullOrBlank()
 
 android {
     namespace = "com.bitchat"
@@ -26,20 +32,22 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file("../keystore/bitchat-release.keystore")
-            storePassword = keystoreProps.getProperty("storePassword")
-                ?: error("Missing storePassword — add keystore/keystore.properties")
-            keyAlias = "bitchat"
-            keyPassword = keystoreProps.getProperty("keyPassword")
-                ?: error("Missing keyPassword — add keystore/keystore.properties")
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = keystoreFile
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = "bitchat"
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
         }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -71,7 +79,22 @@ android {
     applicationVariants.all {
         val variant = this
         outputs.all {
-            (this as BaseVariantOutputImpl).outputFileName = "Ghostwire-${variant.versionName}.apk"
+            (this as BaseVariantOutputImpl).outputFileName =
+                    "Ghostwire-${variant.buildType.name}-${variant.versionName}.apk"
+        }
+    }
+}
+
+if (!hasReleaseKeystore) {
+    tasks.matching {
+        it.name.contains("Release") && (it.name.startsWith("assemble") || it.name.startsWith("bundle"))
+    }.configureEach {
+        doFirst {
+            error(
+                "No release keystore: create keystore/bitchat-release.keystore and " +
+                        "keystore/keystore.properties (storePassword, keyPassword, alias 'bitchat'), " +
+                        "or build assembleDebug instead."
+            )
         }
     }
 }
