@@ -92,5 +92,5 @@ class CryptoEngineTest {
         assertNull(CryptoEngine.verifyBroadcast(nodeId, tamperedBytes))
     }
 
-    private val nodeId = "11".repeat(16)
+    private val nodeId get() = CryptoEngine.nodeId()
 }

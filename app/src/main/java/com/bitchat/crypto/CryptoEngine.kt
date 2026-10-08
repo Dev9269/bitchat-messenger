@@ -18,6 +18,7 @@ import org.bouncycastle.crypto.params.X25519KeyGenerationParameters
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
+import java.security.MessageDigest
 import java.security.SecureRandom
 
 object CryptoEngine {
@@ -136,6 +137,29 @@ object CryptoEngine {
         }
 
     fun x25519PublicKey(): ByteArray = xPub
+
+    fun ed25519PublicKey(): ByteArray = edPub
+
+    /**
+     * The node id is the first 16 bytes of SHA-256 over the ed25519 public key, so a
+     * signature's embedded key can only ever belong to the node id it hashes to. Without
+     * this binding, verification against a packet-supplied key lets anyone mint a signature
+     * claiming any identity.
+     */
+    fun nodeIdFor(ed25519Pub: ByteArray): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(ed25519Pub)
+            .copyOfRange(0, 16)
+            .joinToString("") { "%02x".format(it) }
+
+    /** This device's node id, bound to its own ed25519 key. */
+    fun nodeId(): String = nodeIdFor(edPub)
+
+    /** node id a recovery seed will produce, without touching the live key state. */
+    internal fun nodeIdFromSeed(seed: ByteArray): String {
+        val (_, e) = deriveKeysFromSeed(seed)
+        return nodeIdFor(Ed25519PrivateKeyParameters(e, 0).generatePublicKey().encoded)
+    }
 
     /**
      * Rejects low-order (small-subgroup) X25519 public keys. Such a key drives the shared
@@ -281,6 +305,8 @@ object CryptoEngine {
         val sig = assembled.copyOfRange(0, 64)
         val pub = assembled.copyOfRange(64, 96)
         val text = assembled.copyOfRange(96, assembled.size)
+        // The key that verifies must belong to the node id the packet claims to be from.
+        if (nodeIdFor(pub) != nodeId) return null
         val signedData = broadcastSigningData(nodeId, text)
         return try {
             val verifier = Ed25519Signer()

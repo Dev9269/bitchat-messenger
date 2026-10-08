@@ -10,21 +10,16 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 
 /**
- * A broadcast carries a signed payload plus the signer's ed25519 public key. The signature
- * used to cover only the message text, so the public key was never tied to the node id the
- * packet claimed to be from. An attacker could take a broadcast signed by Alice and relay it
- * with the header's src rewritten to Bob; recipients verified the text against Alice's key
- * and stored it as if Bob had sent it.
- *
- * Node ids are SHA-256(seed), not a function of the ed25519 key, so a receiver cannot derive
- * the binding - it has to be signed.
+ * A broadcast carries a signed payload plus the signer's ed25519 public key, and a node id is
+ * first16(SHA-256(that key)). Verification must reject any packet whose embedded key does not
+ * hash to the node id the packet claims. Otherwise an attacker mints a fresh signature over
+ * the victim's node id using their own key, embeds their own key, and is accepted as the
+ * victim - which is exactly what happened before node ids were bound to keys.
  */
 @RunWith(RobolectricTestRunner::class)
 class BroadcastSignatureTest {
 
     private val context: Context get() = RuntimeEnvironment.getApplication()
-    private val alice = "aa".repeat(16)
-    private val bob = "bb".repeat(16)
 
     @Before
     fun reset() {
@@ -36,27 +31,39 @@ class BroadcastSignatureTest {
     }
 
     @Test
-    fun aSignatureIsOnlyValidForTheNodeIdItWasSignedFor() {
+    fun aBroadcastVerifiesForTheSignersOwnNodeId() {
         val text = "hello mesh".toByteArray(Charsets.UTF_8)
-        val signedByAlice = CryptoEngine.signBroadcast(alice, text)
+        val sender = CryptoEngine.nodeId()
+        val signed = CryptoEngine.signBroadcast(sender, text)
 
-        assertArrayEquals(
-            "the sender's own node id must still verify",
-            text,
-            CryptoEngine.verifyBroadcast(alice, signedByAlice)
-        )
+        assertArrayEquals(text, CryptoEngine.verifyBroadcast(sender, signed))
+    }
+
+    @Test
+    fun aPeerCannotMintABroadcastForAnotherNodeId() {
+        val victim = "cc".repeat(16)
+        val forged = CryptoEngine.signBroadcast(victim, "i am the victim".toByteArray(Charsets.UTF_8))
+
         assertNull(
-            "a signature made for one node id must not verify as another",
-            CryptoEngine.verifyBroadcast(bob, signedByAlice)
+            "a signature keyed by our own key must not be accepted as the victim",
+            CryptoEngine.verifyBroadcast(victim, forged)
         )
     }
 
     @Test
-    fun tamperedTextIsRejected() {
-        val signedByAlice = CryptoEngine.signBroadcast(alice, "hello".toByteArray(Charsets.UTF_8))
-        signedByAlice[signedByAlice.lastIndex] =
-            (signedByAlice.last().toInt() xor 0x01).toByte()
+    fun aBroadcastIsRejectedWhenTheClaimedNodeIdDiffersFromTheSigner() {
+        val sender = CryptoEngine.nodeId()
+        val signed = CryptoEngine.signBroadcast(sender, "hello".toByteArray(Charsets.UTF_8))
 
-        assertNull(CryptoEngine.verifyBroadcast(alice, signedByAlice))
+        assertNull(CryptoEngine.verifyBroadcast("bb".repeat(16), signed))
+    }
+
+    @Test
+    fun tamperedTextIsRejected() {
+        val sender = CryptoEngine.nodeId()
+        val signed = CryptoEngine.signBroadcast(sender, "hello".toByteArray(Charsets.UTF_8))
+        signed[signed.lastIndex] = (signed.last().toInt() xor 0x01).toByte()
+
+        assertNull(CryptoEngine.verifyBroadcast(sender, signed))
     }
 }
