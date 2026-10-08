@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import com.bitchat.crypto.Recovery
 import com.bitchat.mesh.MeshManager
 import com.bitchat.mesh.MeshService
+import com.bitchat.ui.common.SecureScreen
 
 /**
  * Shown once on first launch (and after a restore): hands the user their
@@ -50,6 +51,7 @@ import com.bitchat.mesh.MeshService
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountGate(onDone: () -> Unit) {
+    SecureScreen()
     val context = LocalContext.current
     val seed = remember { Recovery.getSeed(context) }
 
