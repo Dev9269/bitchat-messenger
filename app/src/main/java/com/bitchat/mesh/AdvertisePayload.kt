@@ -4,6 +4,21 @@ object AdvertisePayload {
 
     const val MAX_NAME_BYTES = 6
 
+    /** Length byte + AD type (Service Data 16-bit UUID, 0x16) + the 16-bit service UUID. */
+    private const val SERVICE_DATA_HEADER_BYTES = 4
+
+    /** Flags AD, which the advertising stack always emits. */
+    private const val FLAGS_BYTES = 3
+
+    /**
+     * The full size of a discovery advertisement, in bytes. Guards the 31-byte legacy cap: a
+     * payload that grows past this becomes invisible to every peer, because the stack rejects
+     * the advertisement with ADVERTISE_FAILED_DATA_TOO_LARGE rather than failing loudly.
+     */
+    fun advertisementBytes(payloadSize: Int, includeTxPowerLevel: Boolean): Int =
+        FLAGS_BYTES + SERVICE_DATA_HEADER_BYTES + payloadSize +
+            if (includeTxPowerLevel) MeshConstants.TX_POWER_AD_BYTES else 0
+
     fun encode(nodeId: String, name: String): ByteArray {
         val idBytes = nodeId.hexToBytes()
         val nameBytes = name.toByteArray(Charsets.UTF_8).take(MAX_NAME_BYTES).toByteArray()
