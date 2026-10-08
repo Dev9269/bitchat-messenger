@@ -38,6 +38,9 @@ The contract: an anonymous session gets a UID. The first document a UID writes
 in `profiles/{username}` / `nodes/{nodeId}` binds that username/node to the
 UID forever (create-only, updates only by owner, deletes forbidden).
 Group membership key envelopes can only be planted by the group owner.
+Group messages and control docs can only be written by a node the caller owns,
+so no one can inject or delete a message as another identity. The personal-chat
+secret is stored as a salted PBKDF2 verifier (never a bare hash).
 Messages/inboxes are UID-scoped. Firestore NEVER enforces the "anonymous
 account" UI — the REST layer + these rules do.
 
@@ -86,6 +89,7 @@ groups/{groupId}/messages/{msgId}
                           -> { msg_id, sender, payload(signed enc), ts }
 mygroups/{nodeId}/invites/{groupId} -> { group_id }
 presence/{nodeId}        -> { uid, node_id, online, last_seen }
+settings/access          -> { owner, allowlist, personal_secret(PBKDF2), personal_secret_salt }
 ```
 
 ## Privacy model

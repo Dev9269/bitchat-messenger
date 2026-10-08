@@ -15,6 +15,21 @@ service cloud.firestore {
       return request.auth != null && uidField == request.auth.uid;
     }
 
+    function isSelfNode(nodeId) {
+      // True iff [nodeId] is a node document owned by the caller. Used to stop a session
+      // writing data (group messages/control) while claiming another node's identity.
+      return request.auth != null
+             && get(/databases/$(database)/documents/nodes/$(nodeId)).data.uid == request.auth.uid;
+    }
+
+    function secretIsSalted() {
+      // If a secret verifier is present it must be a base64 string accompanied by a salt,
+      // so a bare (offline-crackable) hash can never be stored.
+      return !("personal_secret" in request.resource.data)
+             || (request.resource.data.personal_secret is string
+                 && request.resource.data.personal_secret_salt is string);
+    }
+
     match /profiles/{username} {
       allow read: if request.auth != null;
       // Creating a profile = claiming the username. The caller must stamp its
@@ -67,18 +82,22 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------------
-    // Access control (Session-style). One settings/access document holds the
-    // SHA-256 of the personal-chat master secret and the allowlist of nodeIds
-    // the owner granted personal chat to. The FIRST create binds the owner
-    // UID immutably (like username claims). Any authenticated user may read
-    // it (it only contains hashes), but only the owner may change it.
+    // Access control (Session-style). One settings/access document holds a
+    // salted PBKDF2 verifier of the personal-chat master secret and the
+    // allowlist of nodeIds the owner granted personal chat to. The FIRST
+    // create binds the owner UID immutably (like username claims). Any
+    // authenticated user may read the allowlist, but only the owner may
+    // change it. A stored secret must always carry its salt, so a bare hash
+    // can never be written.
     // ---------------------------------------------------------------------
 
     match /settings/access {
       allow read: if request.auth != null;
-      allow create: if isBound(request.resource.data.owner);
+      allow create: if isBound(request.resource.data.owner)
+                    && secretIsSalted();
       allow update: if isBound(resource.data.owner)
-                     && resource.data.owner == request.resource.data.owner;
+                     && resource.data.owner == request.resource.data.owner
+                     && secretIsSalted();
       allow delete: if false;
     }
 
@@ -89,8 +108,8 @@ service cloud.firestore {
     // group) where any authenticated node may self-join with a placeholder
     // envelope that the owner then fills in. Members may delete their own
     // membership (leaving a group); the owner may delete anyone (kick).
-    // Messages may be created by any authenticated node (contents are E2EE +
-    // signed; tampering is caught on decrypt/verify).
+    // Messages/control docs may only be written by a node the caller owns
+    // (see the messages rule); bodies are E2EE + signed.
     // ---------------------------------------------------------------------
 
     match /groups/{groupId} {
@@ -116,15 +135,12 @@ service cloud.firestore {
 
       match /messages/{msgId} {
         allow read: if request.auth != null;
-        allow create: if request.auth != null;
-        // Group message edits: any authenticated member may update the
-        // payload (contents are E2EE + signed; tampering is caught on
-        // decrypt/verify). Control docs (group delete/kick) may be
-        // cleaned up by anyone who processed them. Any member may delete
-        // (purge) a message doc — contents are ciphertext, so deletion
-        // only affects the ephemeral mailbox, never device history.
-        allow update: if request.auth != null;
-        allow delete: if request.auth != null;
+        // A message (or delete/kick control doc) must be authored by a node the
+        // caller actually owns, so an outsider cannot inject/rewrite/delete a
+        // message as another member. Bodies are additionally E2EE + signed.
+        allow create: if isSelfNode(request.resource.data.sender);
+        allow update: if isSelfNode(resource.data.sender);
+        allow delete: if isSelfNode(resource.data.sender);
       }
     }
 
