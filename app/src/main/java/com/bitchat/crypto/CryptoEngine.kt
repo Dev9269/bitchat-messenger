@@ -29,6 +29,7 @@ object CryptoEngine {
     private const val KEY_E_PUB = "ed25519_pub"
     private const val HMAC_SIZE = 128
     private const val ENC_PREFIX = "enc1:"
+    private val BROADCAST_DOMAIN = "bitchat-broadcast-v1:".toByteArray(Charsets.UTF_8)
 
     private val random = SecureRandom()
 
@@ -234,10 +235,19 @@ object CryptoEngine {
         return out
     }
 
-    fun signBroadcast(text: ByteArray): ByteArray {
+    /**
+     * The bytes an Ed25519 broadcast signature covers: a domain separator, then the sender's
+     * node id, then the payload. Binding the node id stops an attacker relaying a broadcast
+     * signed by one identity while claiming the packet came from another.
+     */
+    internal fun broadcastSigningData(nodeId: String, text: ByteArray): ByteArray =
+        BROADCAST_DOMAIN + nodeId.toByteArray(Charsets.UTF_8) + text
+
+    fun signBroadcast(nodeId: String, text: ByteArray): ByteArray {
+        val signedData = broadcastSigningData(nodeId, text)
         val signer = Ed25519Signer()
         signer.init(true, edPriv)
-        signer.update(text, 0, text.size)
+        signer.update(signedData, 0, signedData.size)
         val sig = signer.generateSignature()
         return ByteArray(64 + edPub.size + text.size).also { out ->
             sig.copyInto(out, 0)
@@ -246,15 +256,16 @@ object CryptoEngine {
         }
     }
 
-    fun verifyBroadcast(assembled: ByteArray): ByteArray? {
+    fun verifyBroadcast(nodeId: String, assembled: ByteArray): ByteArray? {
         if (assembled.size < 96) return null
         val sig = assembled.copyOfRange(0, 64)
         val pub = assembled.copyOfRange(64, 96)
         val text = assembled.copyOfRange(96, assembled.size)
+        val signedData = broadcastSigningData(nodeId, text)
         return try {
             val verifier = Ed25519Signer()
             verifier.init(false, Ed25519PublicKeyParameters(pub, 0))
-            verifier.update(text, 0, text.size)
+            verifier.update(signedData, 0, signedData.size)
             if (verifier.verifySignature(sig)) text else null
         } catch (_: Exception) {
             null

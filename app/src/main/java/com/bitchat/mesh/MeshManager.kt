@@ -349,7 +349,7 @@ object MeshManager {
             }
             val key = Base64.decode(secret, Base64.NO_WRAP)
             val ciphertext = CryptoEngine.encryptGroupMessage(key, msgId, text.toByteArray(Charsets.UTF_8))
-            val signed = CryptoEngine.signBroadcast(ciphertext)
+            val signed = CryptoEngine.signBroadcast(nodeId.value, ciphertext)
             val signedB64 = Base64.encodeToString(signed, Base64.NO_WRAP)
             OnlineService.sendGroupMessage(groupId, msgId.hex(), signedB64, now)
             val packets = buildGroupPackets(signed, msgId, groupId)
@@ -433,7 +433,7 @@ object MeshManager {
             val secret = DataGraph.repository.groupSecret(groupId) ?: return@launch
             val key = Base64.decode(secret, Base64.NO_WRAP)
             val ciphertext = CryptoEngine.encryptGroupMessage(key, msgIdHex.hexToBytes(), newText.toByteArray(Charsets.UTF_8))
-            val signed = CryptoEngine.signBroadcast(ciphertext)
+            val signed = CryptoEngine.signBroadcast(nodeId.value, ciphertext)
             val signedB64 = Base64.encodeToString(signed, Base64.NO_WRAP)
             OnlineService.sendGroupEdit(groupId, msgIdHex, signedB64)
             val info = JSONObject().put("m", msgIdHex).put("p", signedB64)
@@ -468,7 +468,7 @@ object MeshManager {
             try {
                 if (!DataGraph.repository.isGroupMember(groupId, nodeId.value)) return@launch
                 val decoded = Base64.decode(signedB64, Base64.NO_WRAP)
-                val ciphertext = CryptoEngine.verifyBroadcast(decoded) ?: return@launch
+                val ciphertext = CryptoEngine.verifyBroadcast(senderNode, decoded) ?: return@launch
                 val secretRaw = DataGraph.repository.groupSecret(groupId) ?: return@launch
                 val key = Base64.decode(secretRaw, Base64.NO_WRAP)
                 val plaintext = CryptoEngine.decryptGroupMessage(key, msgIdHex.hexToBytes(), ciphertext) ?: return@launch
@@ -516,7 +516,7 @@ object MeshManager {
             try {
                 if (!DataGraph.repository.isGroupMember(groupId, nodeId.value)) return@launch
                 val decoded = Base64.decode(signedB64, Base64.NO_WRAP)
-                val ciphertext = CryptoEngine.verifyBroadcast(decoded) ?: return@launch
+                val ciphertext = CryptoEngine.verifyBroadcast(senderNode, decoded) ?: return@launch
                 val secretRaw = DataGraph.repository.groupSecret(groupId) ?: return@launch
                 val key = Base64.decode(secretRaw, Base64.NO_WRAP)
                 val plaintext = CryptoEngine.decryptGroupMessage(key, msgIdHex.hexToBytes(), ciphertext) ?: return@launch
@@ -641,7 +641,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
     }
 
     private fun buildBroadcastPackets(msgId: ByteArray, text: String): List<MeshPacket.Packet> {
-        val signed = CryptoEngine.signBroadcast(text.toByteArray(Charsets.UTF_8))
+        val signed = CryptoEngine.signBroadcast(nodeId.value, text.toByteArray(Charsets.UTF_8))
         return Fragmentation.split(signed, MeshPacket.FRAGMENT_PAYLOAD_SIZE).map {
             MeshPacket.Packet(
                 type = MeshPacket.TYPE_BROADCAST,
@@ -876,7 +876,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
         relayIt(packet)
         val assembled = relay.addFragment(packet) ?: return
         scope.launch {
-            val text = CryptoEngine.verifyBroadcast(assembled) ?: return@launch
+            val text = CryptoEngine.verifyBroadcast(packet.src, assembled) ?: return@launch
             DataGraph.repository.insertMessage(
                 MessageEntity(
                     msgId = msgIdHex,
@@ -921,7 +921,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
         scope.launch {
             if (!DataGraph.repository.isGroupMember(packet.dst, nodeId.value)) return@launch
             val assembled = relay.addFragment(packet) ?: return@launch
-            val ciphertext = CryptoEngine.verifyBroadcast(assembled) ?: return@launch
+            val ciphertext = CryptoEngine.verifyBroadcast(packet.src, assembled) ?: return@launch
             val secretRaw = DataGraph.repository.groupSecret(packet.dst) ?: return@launch
             val key = Base64.decode(secretRaw, Base64.NO_WRAP)
             val plaintext = CryptoEngine.decryptGroupMessage(key, packet.msgId, ciphertext) ?: return@launch
@@ -1109,7 +1109,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
                 if (secretRaw != null) {
                     val key = Base64.decode(secretRaw, Base64.NO_WRAP)
                     val ciphertext = CryptoEngine.encryptGroupMessage(key, message.msgId.hexToBytes(), message.text.toByteArray(Charsets.UTF_8))
-                    val signed = CryptoEngine.signBroadcast(ciphertext)
+                    val signed = CryptoEngine.signBroadcast(nodeId.value, ciphertext)
                     val packets = buildGroupPackets(signed, message.msgId.hexToBytes(), message.conversationId)
                     if (deliverToNetwork(packets)) {
                         DataGraph.repository.setStatus(message.msgId, STATUS_SENT)

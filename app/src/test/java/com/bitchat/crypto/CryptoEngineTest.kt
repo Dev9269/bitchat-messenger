@@ -77,8 +77,8 @@ class CryptoEngineTest {
     @Test
     fun broadcastSignVerifyRoundTrip() {
         val text = "broadcast".toByteArray()
-        val signed = CryptoEngine.signBroadcast(text)
-        val verified = CryptoEngine.verifyBroadcast(signed)
+        val signed = CryptoEngine.signBroadcast(nodeId, text)
+        val verified = CryptoEngine.verifyBroadcast(nodeId, signed)
         assertNotNull(verified)
         assertArrayEquals(text, verified)
     }
@@ -86,9 +86,11 @@ class CryptoEngineTest {
     @Test
     fun broadcastTamperFails() {
         val text = "broadcast".toByteArray()
-        val signed = CryptoEngine.signBroadcast(text)
+        val signed = CryptoEngine.signBroadcast(nodeId, text)
         val tamperedBytes = signed.copyOf()
         tamperedBytes[8] = (tamperedBytes[8].toInt() xor 0xFF).toByte()
-        assertNull(CryptoEngine.verifyBroadcast(tamperedBytes))
+        assertNull(CryptoEngine.verifyBroadcast(nodeId, tamperedBytes))
     }
+
+    private val nodeId = "11".repeat(16)
 }
