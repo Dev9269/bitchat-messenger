@@ -364,6 +364,7 @@ object OnlineService {
             val doc = db.collection("nodes").document(nodeId).get().await()
             val b64 = doc.getString("x_pub") ?: return local
             val pub = Base64.decode(b64, Base64.NO_WRAP)
+            if (!CryptoEngine.isUsableX25519PublicKey(pub)) return local
             if (local != null && !local.contentEquals(pub)) {
                 local
             } else {

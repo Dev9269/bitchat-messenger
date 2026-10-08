@@ -137,6 +137,26 @@ object CryptoEngine {
 
     fun x25519PublicKey(): ByteArray = xPub
 
+    /**
+     * Rejects low-order (small-subgroup) X25519 public keys. Such a key drives the shared
+     * secret to all zeroes for any private key, which BouncyCastle refuses by throwing from
+     * the agreement. A peer sending one must be turned away before we store its key and only
+     * discover later, mid-send, that it poisons the exchange.
+     */
+    fun isUsableX25519PublicKey(key: ByteArray): Boolean {
+        if (key.size != 32) return false
+        val priv = xPriv ?: return false
+        return try {
+            val agreement = X25519Agreement()
+            agreement.init(priv)
+            val shared = ByteArray(agreement.agreementSize)
+            agreement.calculateAgreement(X25519PublicKeyParameters(key, 0), shared, 0)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun deriveKey(material: ByteArray, salt: ByteArray): ByteArray {
         val hkdf = HKDFBytesGenerator(SHA256Digest())
         hkdf.init(HKDFParameters(material, null, salt))

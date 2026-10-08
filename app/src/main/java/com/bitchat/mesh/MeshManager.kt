@@ -657,6 +657,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
     private suspend fun deliverDirect(toNodeId: String, msgId: ByteArray, text: String): Boolean {
         val peer = DataGraph.repository.peer(toNodeId) ?: return false
         val key = peer.x25519PubKey ?: return false
+        if (!CryptoEngine.isUsableX25519PublicKey(key)) return false
         val plaintext = JSONObject()
             .put("t", text)
             .put("ts", System.currentTimeMillis())
@@ -895,7 +896,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
 
     private fun handleHandshake(packet: MeshPacket.Packet, channel: PacketChannel) {
         scope.launch {
-            if (packet.payload.size == 32) {
+            if (packet.payload.size == 32 && CryptoEngine.isUsableX25519PublicKey(packet.payload)) {
                 val existing = DataGraph.repository.peer(packet.src)?.x25519PubKey
                 if (existing == null || existing.contentEquals(packet.payload)) {
                     DataGraph.repository.setPeerKey(packet.src, packet.payload)
