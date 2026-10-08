@@ -19,6 +19,21 @@ object KeystoreVault {
     private const val IV_SIZE = 12
     private const val TAG_BITS = 128
 
+    /**
+     * True only where the platform keystore provider is genuinely absent, i.e. JVM unit
+     * tests. Where it is present every failure is propagated: quietly re-keying with a
+     * throwaway in-memory key writes ciphertext the next process cannot read, which is how
+     * identities used to be silently replaced on every launch.
+     */
+    private val keystoreAbsent: Boolean by lazy {
+        try {
+            KeyStore.getInstance("AndroidKeyStore").load(null)
+            false
+        } catch (_: Exception) {
+            true
+        }
+    }
+
     fun encrypt(plain: ByteArray): ByteArray {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, vaultKey())
@@ -42,14 +57,10 @@ object KeystoreVault {
     }
 
     private fun vaultKey(): SecretKey {
-        val keystoreKey = try {
-            val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-            (ks.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
-                ?: generateKeystoreKey()
-        } catch (_: Exception) {
-            null
-        }
-        return keystoreKey ?: fallbackKey
+        if (keystoreAbsent) return fallbackKey
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val existing = (ks.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
+        return existing ?: generateKeystoreKey()
     }
 
     private fun generateKeystoreKey(): SecretKey {

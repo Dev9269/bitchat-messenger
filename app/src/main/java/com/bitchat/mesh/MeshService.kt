@@ -13,7 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.bitchat.MainActivity
 import com.bitchat.R
-import com.bitchat.data.DataGraph
+import com.bitchat.startup.StartupGate
 
 class MeshService : Service() {
 
@@ -28,9 +28,10 @@ class MeshService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (DataGraph.openFailure != null) {
-            // The mesh writes every seen packet to the database. Without one it cannot run,
-            // and START_STICKY would otherwise restart this service into a crash loop.
+        if (StartupGate.blockedReason != null) {
+            // The mesh writes every seen packet to the database and signs with the account
+            // keys. With either unavailable it cannot run, and START_STICKY would otherwise
+            // restart this service into a crash loop.
             stopSelf()
             return START_NOT_STICKY
         }

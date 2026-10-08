@@ -4,18 +4,11 @@ import android.content.Context
 import android.util.Base64
 import androidx.room.Room
 import com.bitchat.crypto.KeystoreVault
+import com.bitchat.startup.StartupGate
 import net.sqlcipher.database.SupportFactory
 import java.security.SecureRandom
 
 object DataGraph {
-
-    /**
-     * Non-null when the encrypted database could not be opened. Nothing that touches
-     * [repository] may run while it is set; the database file on disk has been left
-     * exactly as it was and the UI has to say so rather than carry on as if empty.
-     */
-    var openFailure: String? = null
-        private set
 
     lateinit var database: AppDatabase
         private set
@@ -26,7 +19,6 @@ object DataGraph {
     class DatabaseOpenException(message: String) : Exception(message)
 
     fun init(context: Context) {
-        openFailure = null
         if (isRobolectric()) {
             database = Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME).build()
             return
@@ -34,11 +26,13 @@ object DataGraph {
         try {
             database = openEncrypted(context)
         } catch (e: Exception) {
-            openFailure = "Ghostwire could not unlock its local database" +
-                (e.message?.let { ": $it" } ?: "") + ". " +
-                "Your messages have NOT been deleted and are still on this device. " +
-                "If this keeps happening, reinstall the app and restore your account " +
-                "with your recovery key."
+            StartupGate.block(
+                "Ghostwire could not unlock its local database" +
+                    (e.message?.let { ": $it" } ?: "") + ". " +
+                    "Your messages have NOT been deleted and are still on this device. " +
+                    "If this keeps happening, reinstall the app and restore your account " +
+                    "with your recovery key."
+            )
         }
     }
 

@@ -21,7 +21,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bitchat.crypto.Recovery
-import com.bitchat.data.DataGraph
+import com.bitchat.startup.StartupGate
 import com.bitchat.mesh.MeshManager
 import com.bitchat.mesh.MeshService
 import com.bitchat.mesh.PermissionRequirements
@@ -83,10 +83,10 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun AppContent() {
-        val dbFailure = DataGraph.openFailure
+        val dbFailure = StartupGate.blockedReason
         if (dbFailure != null) {
-            // Every screen below reads through DataGraph.repository, which is unusable
-            // when the database never opened. Say so instead of crashing on first access.
+            // Every screen below reads through DataGraph.repository and the account keys,
+            // both unusable when startup was blocked. Say so instead of crashing on access.
             DatabaseBlockedScreen(message = dbFailure)
             return
         }
@@ -220,7 +220,7 @@ class MainActivity : ComponentActivity() {
 
     private fun maybeAutoStartMesh() {
         if (meshAutoStarted) return
-        if (DataGraph.openFailure != null) return
+        if (StartupGate.blockedReason != null) return
         if (!PermissionRequirements.allGranted(this)) return
         if (!MeshManager.bluetoothEnabled.value) return
         meshAutoStarted = true

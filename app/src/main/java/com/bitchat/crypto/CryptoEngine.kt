@@ -32,6 +32,12 @@ object CryptoEngine {
 
     private val random = SecureRandom()
 
+    /**
+     * Raised when stored account keys exist but cannot be decrypted. Generating a fresh
+     * identity in that situation would silently replace the user's account.
+     */
+    class IdentityUnavailableException(message: String) : Exception(message)
+
     private var xPriv: X25519PrivateKeyParameters? = null
     private var xPub: ByteArray = ByteArray(0)
     private var edPriv: Ed25519PrivateKeyParameters? = null
@@ -42,6 +48,15 @@ object CryptoEngine {
         val existing = prefs.getString(KEY_X_PRIV, null)
         val decoded = existing?.let { decodeStored(it) }
         val seed = Recovery.getSeed(context)
+
+        // A stored private key that will not decode means the keystore refused us, not that
+        // this is a fresh install. Falling through to the branches below would derive and
+        // persist a brand new identity, silently replacing the user's account.
+        if (existing != null && decoded == null) {
+            throw IdentityUnavailableException(
+                "the stored account keys could not be decrypted"
+            )
+        }
         if (decoded == null && seed == null) {
             // Fresh install: generate the recovery seed now; the identity
             // derives from it (0.4.0). Legacy 0.3.x installs keep random keys.
