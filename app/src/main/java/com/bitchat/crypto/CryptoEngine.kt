@@ -159,6 +159,14 @@ object CryptoEngine {
     /** This device's node id, bound to its own ed25519 key. */
     fun nodeId(): String = nodeIdFor(edPub)
 
+    /**
+     * Trust-on-first-use pin: a peer's key is adopted only if none is stored yet, or the
+     * stored one is identical. A later, different key for the same node id is refused so a
+     * peer's identity-bound key cannot be swapped out from under an established conversation.
+     */
+    fun shouldAdoptPeerKey(existing: ByteArray?, candidate: ByteArray): Boolean =
+        existing == null || existing.contentEquals(candidate)
+
     /** node id a recovery seed will produce, without touching the live key state. */
     internal fun nodeIdFromSeed(seed: ByteArray): String {
         val (_, e) = deriveKeysFromSeed(seed)

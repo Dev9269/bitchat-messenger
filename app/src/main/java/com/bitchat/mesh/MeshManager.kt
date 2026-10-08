@@ -902,7 +902,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
             val boundKey = CryptoEngine.extractBoundX25519Pub(packet.src, packet.payload)
             if (boundKey != null) {
                 val existing = DataGraph.repository.peer(packet.src)?.x25519PubKey
-                if (existing == null || existing.contentEquals(boundKey)) {
+                if (CryptoEngine.shouldAdoptPeerKey(existing, boundKey)) {
                     DataGraph.repository.setPeerKey(packet.src, boundKey)
                 }
             }

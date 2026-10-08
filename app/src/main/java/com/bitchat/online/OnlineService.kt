@@ -367,7 +367,7 @@ object OnlineService {
             val b64 = doc.getString("binding") ?: return local
             val pub = CryptoEngine.extractBoundX25519Pub(nodeId, Base64.decode(b64, Base64.NO_WRAP))
                 ?: return local
-            if (local != null && !local.contentEquals(pub)) {
+            if (!CryptoEngine.shouldAdoptPeerKey(local, pub)) {
                 local
             } else {
                 if (local == null) DataGraph.repository.setPeerKey(nodeId, pub)
