@@ -16,7 +16,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,7 +41,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.bitchat.mesh.MeshManager
 import com.bitchat.online.OnlineConfig
@@ -69,9 +67,6 @@ fun OnlineSettingsScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val connected = state.status == OnlineService.ConnectionStatus.CONNECTED
     var apiKeyEditMode by rememberSaveable { mutableStateOf(false) }
-    var showKeyDialog by remember { mutableStateOf(false) }
-    var keyPassword by rememberSaveable { mutableStateOf("") }
-    var keyPasswordError by remember { mutableStateOf(false) }
 
     LaunchedEffect(connected) {
         if (connected) {
@@ -135,11 +130,7 @@ fun OnlineSettingsScreen(onBack: () -> Unit) {
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(onClick = {
-                        keyPassword = ""
-                        keyPasswordError = false
-                        showKeyDialog = true
-                    }) {
+                    TextButton(onClick = { apiKeyEditMode = true }) {
                         Text("Edit")
                     }
                 }
@@ -358,59 +349,6 @@ fun OnlineSettingsScreen(onBack: () -> Unit) {
             ) {
                 Text("Disconnect")
             }
-        }
-
-        if (showKeyDialog) {
-            AlertDialog(
-                onDismissRequest = { showKeyDialog = false },
-                title = { Text("Edit API key") },
-                text = {
-                    Column {
-                        Text(
-                            "The API key is configured inside this app by the owner. Enter the admin password to change it.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = keyPassword,
-                            onValueChange = {
-                                keyPassword = it
-                                keyPasswordError = false
-                            },
-                            label = { Text("Password") },
-                            visualTransformation = PasswordVisualTransformation(),
-                            singleLine = true,
-                            isError = keyPasswordError,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        if (keyPasswordError) {
-                            Text(
-                                "Wrong password",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        if (keyPassword == OnlineConfig.CONFIG_PASSWORD) {
-                            showKeyDialog = false
-                            apiKeyEditMode = true
-                        } else {
-                            keyPasswordError = true
-                        }
-                    }) {
-                        Text("Verify")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showKeyDialog = false }) {
-                        Text("Cancel")
-                    }
-                },
-            )
         }
     }
 }
