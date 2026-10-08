@@ -75,8 +75,8 @@ they go over Bluetooth.
 ## Data layout (map)
 
 ```
-profiles/{username}      -> { uid, username, node_id, display_name, x_pub }
-nodes/{nodeId}           -> { uid, username, node_id, display_name, x_pub }   (reverse index)
+profiles/{username}      -> { uid, username, node_id, display_name, binding }
+nodes/{nodeId}           -> { uid, username, node_id, display_name, binding }  (reverse index)
 myinbox/{nodeId}/messages/{msgId}
                           -> { msg_id, sender, recipient_node, payload(enc), ts }
 groups/{groupId}         -> { uid, name, created_by, created_at }

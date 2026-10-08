@@ -162,12 +162,12 @@ object OnlineService {
                 }
             }
 
-            val xPubB64 = Base64.encodeToString(CryptoEngine.x25519PublicKey(), Base64.NO_WRAP)
+            val bindingB64 = Base64.encodeToString(CryptoEngine.ownKeyBinding(), Base64.NO_WRAP)
             val profileData = mapOf(
                 "username" to myUsername,
                 "node_id" to myNode,
                 "display_name" to MeshManager.displayName.value,
-                "x_pub" to xPubB64,
+                "binding" to bindingB64,
                 "uid" to myUid,
                 "created_at" to System.currentTimeMillis()
             )
@@ -362,9 +362,11 @@ object OnlineService {
         val db = firestore ?: return local
         return try {
             val doc = db.collection("nodes").document(nodeId).get().await()
-            val b64 = doc.getString("x_pub") ?: return local
-            val pub = Base64.decode(b64, Base64.NO_WRAP)
-            if (!CryptoEngine.isUsableX25519PublicKey(pub)) return local
+            // The document's key is only trusted if it carries a binding proving it belongs
+            // to that node id; a bare x_pub could be written by anyone for anyone.
+            val b64 = doc.getString("binding") ?: return local
+            val pub = CryptoEngine.extractBoundX25519Pub(nodeId, Base64.decode(b64, Base64.NO_WRAP))
+                ?: return local
             if (local != null && !local.contentEquals(pub)) {
                 local
             } else {

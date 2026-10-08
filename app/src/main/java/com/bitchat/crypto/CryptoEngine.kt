@@ -31,6 +31,10 @@ object CryptoEngine {
     private const val HMAC_SIZE = 128
     private const val ENC_PREFIX = "enc1:"
     private val BROADCAST_DOMAIN = "bitchat-broadcast-v1:".toByteArray(Charsets.UTF_8)
+    private val KEY_BINDING_DOMAIN = "bitchat-nodekey-v1:".toByteArray(Charsets.UTF_8)
+
+    /** ed_pub (32) || x_pub (32) || ed25519 signature (64). */
+    const val KEY_BINDING_SIZE = 128
 
     private val random = SecureRandom()
 
@@ -159,6 +163,55 @@ object CryptoEngine {
     internal fun nodeIdFromSeed(seed: ByteArray): String {
         val (_, e) = deriveKeysFromSeed(seed)
         return nodeIdFor(Ed25519PrivateKeyParameters(e, 0).generatePublicKey().encoded)
+    }
+
+    /**
+     * Bytes a node-id key binding signs: a domain separator, the node id, then the x25519
+     * public key. Binding the node id stops a binding made for one identity being replayed
+     * under another.
+     */
+    private fun keyBindingSigningData(nodeId: String, x25519Pub: ByteArray): ByteArray =
+        KEY_BINDING_DOMAIN + nodeId.toByteArray(Charsets.UTF_8) + x25519Pub
+
+    /**
+     * This device's proof that its x25519 key belongs to its node id: ed_pub || x_pub ||
+     * ed25519 signature over (domain + node_id + x_pub). Peers publish this instead of a bare
+     * x25519 key so the key cannot be swapped while keeping the node id.
+     */
+    fun ownKeyBinding(): ByteArray {
+        val data = keyBindingSigningData(nodeId(), xPub)
+        val signer = Ed25519Signer()
+        signer.init(true, edPriv)
+        signer.update(data, 0, data.size)
+        val sig = signer.generateSignature()
+        return ByteArray(KEY_BINDING_SIZE).also { out ->
+            edPub.copyInto(out, 0)
+            xPub.copyInto(out, 32)
+            sig.copyInto(out, 64)
+        }
+    }
+
+    /**
+     * Returns the x25519 key from a binding iff it is valid for [nodeId]: the embedded ed25519
+     * key must hash to the node id and must sign the embedded x25519 key. Also rejects
+     * low-order x25519 keys. Returns null for any malformed, tampered, or mismatched binding.
+     */
+    fun extractBoundX25519Pub(nodeId: String, blob: ByteArray): ByteArray? {
+        if (blob.size != KEY_BINDING_SIZE) return null
+        val edPub = blob.copyOfRange(0, 32)
+        val xPub = blob.copyOfRange(32, 64)
+        val sig = blob.copyOfRange(64, 128)
+        if (nodeIdFor(edPub) != nodeId) return null
+        if (!isUsableX25519PublicKey(xPub)) return null
+        return try {
+            val data = keyBindingSigningData(nodeId, xPub)
+            val verifier = Ed25519Signer()
+            verifier.init(false, Ed25519PublicKeyParameters(edPub, 0))
+            verifier.update(data, 0, data.size)
+            if (verifier.verifySignature(sig)) xPub else null
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /**

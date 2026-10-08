@@ -692,7 +692,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
             src = nodeId.value,
             dst = toNodeId,
             ttl = MeshPacket.DEFAULT_TTL,
-            payload = CryptoEngine.x25519PublicKey(),
+            payload = CryptoEngine.ownKeyBinding(),
         )
         deliverToNetwork(listOf(packet))
     }
@@ -896,10 +896,14 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
 
     private fun handleHandshake(packet: MeshPacket.Packet, channel: PacketChannel) {
         scope.launch {
-            if (packet.payload.size == 32 && CryptoEngine.isUsableX25519PublicKey(packet.payload)) {
+            // Only accept the peer's key if it comes with a binding proving it belongs to the
+            // packet's claimed node id - a bare key would let anyone advertise a node id that
+            // is not theirs.
+            val boundKey = CryptoEngine.extractBoundX25519Pub(packet.src, packet.payload)
+            if (boundKey != null) {
                 val existing = DataGraph.repository.peer(packet.src)?.x25519PubKey
-                if (existing == null || existing.contentEquals(packet.payload)) {
-                    DataGraph.repository.setPeerKey(packet.src, packet.payload)
+                if (existing == null || existing.contentEquals(boundKey)) {
+                    DataGraph.repository.setPeerKey(packet.src, boundKey)
                 }
             }
             val reply = MeshPacket.Packet(
@@ -908,7 +912,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
                 src = nodeId.value,
                 dst = packet.src,
                 ttl = MeshPacket.DEFAULT_TTL,
-                payload = CryptoEngine.x25519PublicKey(),
+                payload = CryptoEngine.ownKeyBinding(),
             )
             channel.send(MeshPacket.encode(reply))
             flushPendingFor(packet.src)
