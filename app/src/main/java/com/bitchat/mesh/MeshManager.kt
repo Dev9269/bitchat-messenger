@@ -287,7 +287,7 @@ object MeshManager {
                 src = nodeId.value,
                 dst = MeshPacket.BROADCAST_NODE_HEX,
                 ttl = MeshPacket.DEFAULT_TTL,
-                payload = info.toString().toByteArray(Charsets.UTF_8),
+                payload = GroupControl.sign(nodeId.value, info),
             )
             deliverToNetwork(listOf(packet))
         }
@@ -386,7 +386,7 @@ object MeshManager {
                 src = nodeId.value,
                 dst = MeshPacket.BROADCAST_NODE_HEX,
                 ttl = MeshPacket.DEFAULT_TTL,
-                payload = info.toString().toByteArray(Charsets.UTF_8),
+                payload = GroupControl.sign(nodeId.value, info),
             )
             deliverToNetwork(listOf(packet))
         }
@@ -419,7 +419,7 @@ object MeshManager {
                 src = nodeId.value,
                 dst = MeshPacket.BROADCAST_NODE_HEX,
                 ttl = MeshPacket.DEFAULT_TTL,
-                payload = info.toString().toByteArray(Charsets.UTF_8),
+                payload = GroupControl.sign(nodeId.value, info),
             )
             deliverToNetwork(listOf(packet))
             onResult(true, "Member removed")
@@ -953,7 +953,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
         relayIt(packet)
         scope.launch {
             try {
-                val json = JSONObject(String(packet.payload, Charsets.UTF_8))
+                val json = GroupControl.parse(packet.src, packet.payload) ?: return@launch
                 val groupId = json.getString("g")
                 val name = json.getString("n")
                 val members = json.optJSONArray("m") ?: return@launch
@@ -987,7 +987,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
     private fun handleGroupDelete(packet: MeshPacket.Packet) {
         scope.launch {
             try {
-                val json = JSONObject(String(packet.payload, Charsets.UTF_8))
+                val json = GroupControl.parse(packet.src, packet.payload) ?: return@launch
                 val groupId = json.getString("g")
                 val group = DataGraph.repository.group(groupId) ?: return@launch
                 if (group.createdByNodeId != packet.src) return@launch
@@ -1000,7 +1000,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
     private fun handleGroupKick(packet: MeshPacket.Packet) {
         scope.launch {
             try {
-                val json = JSONObject(String(packet.payload, Charsets.UTF_8))
+                val json = GroupControl.parse(packet.src, packet.payload) ?: return@launch
                 val groupId = json.getString("g")
                 val member = json.getString("m")
                 val group = DataGraph.repository.group(groupId) ?: return@launch
