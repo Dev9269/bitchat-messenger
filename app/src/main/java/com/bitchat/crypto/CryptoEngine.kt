@@ -18,6 +18,7 @@ import org.bouncycastle.crypto.params.X25519KeyGenerationParameters
 import org.bouncycastle.crypto.params.X25519PrivateKeyParameters
 import org.bouncycastle.crypto.params.X25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
+import java.security.MessageDigest
 import java.security.SecureRandom
 
 object CryptoEngine {
@@ -29,8 +30,19 @@ object CryptoEngine {
     private const val KEY_E_PUB = "ed25519_pub"
     private const val HMAC_SIZE = 128
     private const val ENC_PREFIX = "enc1:"
+    private val BROADCAST_DOMAIN = "bitchat-broadcast-v1:".toByteArray(Charsets.UTF_8)
+    private val KEY_BINDING_DOMAIN = "bitchat-nodekey-v1:".toByteArray(Charsets.UTF_8)
+
+    /** ed_pub (32) || x_pub (32) || ed25519 signature (64). */
+    const val KEY_BINDING_SIZE = 128
 
     private val random = SecureRandom()
+
+    /**
+     * Raised when stored account keys exist but cannot be decrypted. Generating a fresh
+     * identity in that situation would silently replace the user's account.
+     */
+    class IdentityUnavailableException(message: String) : Exception(message)
 
     private var xPriv: X25519PrivateKeyParameters? = null
     private var xPub: ByteArray = ByteArray(0)
@@ -42,6 +54,15 @@ object CryptoEngine {
         val existing = prefs.getString(KEY_X_PRIV, null)
         val decoded = existing?.let { decodeStored(it) }
         val seed = Recovery.getSeed(context)
+
+        // A stored private key that will not decode means the keystore refused us, not that
+        // this is a fresh install. Falling through to the branches below would derive and
+        // persist a brand new identity, silently replacing the user's account.
+        if (existing != null && decoded == null) {
+            throw IdentityUnavailableException(
+                "the stored account keys could not be decrypted"
+            )
+        }
         if (decoded == null && seed == null) {
             // Fresh install: generate the recovery seed now; the identity
             // derives from it (0.4.0). Legacy 0.3.x installs keep random keys.
@@ -120,6 +141,106 @@ object CryptoEngine {
         }
 
     fun x25519PublicKey(): ByteArray = xPub
+
+    fun ed25519PublicKey(): ByteArray = edPub
+
+    /**
+     * The node id is the first 16 bytes of SHA-256 over the ed25519 public key, so a
+     * signature's embedded key can only ever belong to the node id it hashes to. Without
+     * this binding, verification against a packet-supplied key lets anyone mint a signature
+     * claiming any identity.
+     */
+    fun nodeIdFor(ed25519Pub: ByteArray): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(ed25519Pub)
+            .copyOfRange(0, 16)
+            .joinToString("") { "%02x".format(it) }
+
+    /** This device's node id, bound to its own ed25519 key. */
+    fun nodeId(): String = nodeIdFor(edPub)
+
+    /**
+     * Trust-on-first-use pin: a peer's key is adopted only if none is stored yet, or the
+     * stored one is identical. A later, different key for the same node id is refused so a
+     * peer's identity-bound key cannot be swapped out from under an established conversation.
+     */
+    fun shouldAdoptPeerKey(existing: ByteArray?, candidate: ByteArray): Boolean =
+        existing == null || existing.contentEquals(candidate)
+
+    /** node id a recovery seed will produce, without touching the live key state. */
+    internal fun nodeIdFromSeed(seed: ByteArray): String {
+        val (_, e) = deriveKeysFromSeed(seed)
+        return nodeIdFor(Ed25519PrivateKeyParameters(e, 0).generatePublicKey().encoded)
+    }
+
+    /**
+     * Bytes a node-id key binding signs: a domain separator, the node id, then the x25519
+     * public key. Binding the node id stops a binding made for one identity being replayed
+     * under another.
+     */
+    private fun keyBindingSigningData(nodeId: String, x25519Pub: ByteArray): ByteArray =
+        KEY_BINDING_DOMAIN + nodeId.toByteArray(Charsets.UTF_8) + x25519Pub
+
+    /**
+     * This device's proof that its x25519 key belongs to its node id: ed_pub || x_pub ||
+     * ed25519 signature over (domain + node_id + x_pub). Peers publish this instead of a bare
+     * x25519 key so the key cannot be swapped while keeping the node id.
+     */
+    fun ownKeyBinding(): ByteArray {
+        val data = keyBindingSigningData(nodeId(), xPub)
+        val signer = Ed25519Signer()
+        signer.init(true, edPriv)
+        signer.update(data, 0, data.size)
+        val sig = signer.generateSignature()
+        return ByteArray(KEY_BINDING_SIZE).also { out ->
+            edPub.copyInto(out, 0)
+            xPub.copyInto(out, 32)
+            sig.copyInto(out, 64)
+        }
+    }
+
+    /**
+     * Returns the x25519 key from a binding iff it is valid for [nodeId]: the embedded ed25519
+     * key must hash to the node id and must sign the embedded x25519 key. Also rejects
+     * low-order x25519 keys. Returns null for any malformed, tampered, or mismatched binding.
+     */
+    fun extractBoundX25519Pub(nodeId: String, blob: ByteArray): ByteArray? {
+        if (blob.size != KEY_BINDING_SIZE) return null
+        val edPub = blob.copyOfRange(0, 32)
+        val xPub = blob.copyOfRange(32, 64)
+        val sig = blob.copyOfRange(64, 128)
+        if (nodeIdFor(edPub) != nodeId) return null
+        if (!isUsableX25519PublicKey(xPub)) return null
+        return try {
+            val data = keyBindingSigningData(nodeId, xPub)
+            val verifier = Ed25519Signer()
+            verifier.init(false, Ed25519PublicKeyParameters(edPub, 0))
+            verifier.update(data, 0, data.size)
+            if (verifier.verifySignature(sig)) xPub else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Rejects low-order (small-subgroup) X25519 public keys. Such a key drives the shared
+     * secret to all zeroes for any private key, which BouncyCastle refuses by throwing from
+     * the agreement. A peer sending one must be turned away before we store its key and only
+     * discover later, mid-send, that it poisons the exchange.
+     */
+    fun isUsableX25519PublicKey(key: ByteArray): Boolean {
+        if (key.size != 32) return false
+        val priv = xPriv ?: return false
+        return try {
+            val agreement = X25519Agreement()
+            agreement.init(priv)
+            val shared = ByteArray(agreement.agreementSize)
+            agreement.calculateAgreement(X25519PublicKeyParameters(key, 0), shared, 0)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     private fun deriveKey(material: ByteArray, salt: ByteArray): ByteArray {
         val hkdf = HKDFBytesGenerator(SHA256Digest())
@@ -219,10 +340,19 @@ object CryptoEngine {
         return out
     }
 
-    fun signBroadcast(text: ByteArray): ByteArray {
+    /**
+     * The bytes an Ed25519 broadcast signature covers: a domain separator, then the sender's
+     * node id, then the payload. Binding the node id stops an attacker relaying a broadcast
+     * signed by one identity while claiming the packet came from another.
+     */
+    internal fun broadcastSigningData(nodeId: String, text: ByteArray): ByteArray =
+        BROADCAST_DOMAIN + nodeId.toByteArray(Charsets.UTF_8) + text
+
+    fun signBroadcast(nodeId: String, text: ByteArray): ByteArray {
+        val signedData = broadcastSigningData(nodeId, text)
         val signer = Ed25519Signer()
         signer.init(true, edPriv)
-        signer.update(text, 0, text.size)
+        signer.update(signedData, 0, signedData.size)
         val sig = signer.generateSignature()
         return ByteArray(64 + edPub.size + text.size).also { out ->
             sig.copyInto(out, 0)
@@ -231,15 +361,18 @@ object CryptoEngine {
         }
     }
 
-    fun verifyBroadcast(assembled: ByteArray): ByteArray? {
+    fun verifyBroadcast(nodeId: String, assembled: ByteArray): ByteArray? {
         if (assembled.size < 96) return null
         val sig = assembled.copyOfRange(0, 64)
         val pub = assembled.copyOfRange(64, 96)
         val text = assembled.copyOfRange(96, assembled.size)
+        // The key that verifies must belong to the node id the packet claims to be from.
+        if (nodeIdFor(pub) != nodeId) return null
+        val signedData = broadcastSigningData(nodeId, text)
         return try {
             val verifier = Ed25519Signer()
             verifier.init(false, Ed25519PublicKeyParameters(pub, 0))
-            verifier.update(text, 0, text.size)
+            verifier.update(signedData, 0, signedData.size)
             if (verifier.verifySignature(sig)) text else null
         } catch (_: Exception) {
             null

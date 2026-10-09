@@ -31,6 +31,17 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 
+/**
+ * A group invite that arrived over the online mailbox and is waiting for the user to accept or
+ * decline. Nothing is joined until [MeshManager.acceptPendingInvite] runs.
+ */
+data class GroupInvite(
+    val groupId: String,
+    val groupName: String,
+    val inviterNode: String,
+    val inviterName: String,
+)
+
 @SuppressLint("StaticFieldLeak")
 object MeshManager {
 
@@ -73,6 +84,9 @@ object MeshManager {
 
     private val _links = MutableStateFlow<Map<String, MeshLink.State>>(emptyMap())
     val linkStates: StateFlow<Map<String, MeshLink.State>> = _links.asStateFlow()
+
+    private val _pendingInvite = MutableStateFlow<GroupInvite?>(null)
+    val pendingInvite: StateFlow<GroupInvite?> = _pendingInvite.asStateFlow()
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -287,7 +301,7 @@ object MeshManager {
                 src = nodeId.value,
                 dst = MeshPacket.BROADCAST_NODE_HEX,
                 ttl = MeshPacket.DEFAULT_TTL,
-                payload = info.toString().toByteArray(Charsets.UTF_8),
+                payload = GroupControl.sign(nodeId.value, info),
             )
             deliverToNetwork(listOf(packet))
         }
@@ -349,7 +363,7 @@ object MeshManager {
             }
             val key = Base64.decode(secret, Base64.NO_WRAP)
             val ciphertext = CryptoEngine.encryptGroupMessage(key, msgId, text.toByteArray(Charsets.UTF_8))
-            val signed = CryptoEngine.signBroadcast(ciphertext)
+            val signed = CryptoEngine.signBroadcast(nodeId.value, ciphertext)
             val signedB64 = Base64.encodeToString(signed, Base64.NO_WRAP)
             OnlineService.sendGroupMessage(groupId, msgId.hex(), signedB64, now)
             val packets = buildGroupPackets(signed, msgId, groupId)
@@ -386,7 +400,7 @@ object MeshManager {
                 src = nodeId.value,
                 dst = MeshPacket.BROADCAST_NODE_HEX,
                 ttl = MeshPacket.DEFAULT_TTL,
-                payload = info.toString().toByteArray(Charsets.UTF_8),
+                payload = GroupControl.sign(nodeId.value, info),
             )
             deliverToNetwork(listOf(packet))
         }
@@ -419,7 +433,7 @@ object MeshManager {
                 src = nodeId.value,
                 dst = MeshPacket.BROADCAST_NODE_HEX,
                 ttl = MeshPacket.DEFAULT_TTL,
-                payload = info.toString().toByteArray(Charsets.UTF_8),
+                payload = GroupControl.sign(nodeId.value, info),
             )
             deliverToNetwork(listOf(packet))
             onResult(true, "Member removed")
@@ -433,7 +447,7 @@ object MeshManager {
             val secret = DataGraph.repository.groupSecret(groupId) ?: return@launch
             val key = Base64.decode(secret, Base64.NO_WRAP)
             val ciphertext = CryptoEngine.encryptGroupMessage(key, msgIdHex.hexToBytes(), newText.toByteArray(Charsets.UTF_8))
-            val signed = CryptoEngine.signBroadcast(ciphertext)
+            val signed = CryptoEngine.signBroadcast(nodeId.value, ciphertext)
             val signedB64 = Base64.encodeToString(signed, Base64.NO_WRAP)
             OnlineService.sendGroupEdit(groupId, msgIdHex, signedB64)
             val info = JSONObject().put("m", msgIdHex).put("p", signedB64)
@@ -468,7 +482,7 @@ object MeshManager {
             try {
                 if (!DataGraph.repository.isGroupMember(groupId, nodeId.value)) return@launch
                 val decoded = Base64.decode(signedB64, Base64.NO_WRAP)
-                val ciphertext = CryptoEngine.verifyBroadcast(decoded) ?: return@launch
+                val ciphertext = CryptoEngine.verifyBroadcast(senderNode, decoded) ?: return@launch
                 val secretRaw = DataGraph.repository.groupSecret(groupId) ?: return@launch
                 val key = Base64.decode(secretRaw, Base64.NO_WRAP)
                 val plaintext = CryptoEngine.decryptGroupMessage(key, msgIdHex.hexToBytes(), ciphertext) ?: return@launch
@@ -516,7 +530,7 @@ object MeshManager {
             try {
                 if (!DataGraph.repository.isGroupMember(groupId, nodeId.value)) return@launch
                 val decoded = Base64.decode(signedB64, Base64.NO_WRAP)
-                val ciphertext = CryptoEngine.verifyBroadcast(decoded) ?: return@launch
+                val ciphertext = CryptoEngine.verifyBroadcast(senderNode, decoded) ?: return@launch
                 val secretRaw = DataGraph.repository.groupSecret(groupId) ?: return@launch
                 val key = Base64.decode(secretRaw, Base64.NO_WRAP)
                 val plaintext = CryptoEngine.decryptGroupMessage(key, msgIdHex.hexToBytes(), ciphertext) ?: return@launch
@@ -606,30 +620,61 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
         }
     }
 
+    /**
+     * Stage an invite for the user to confirm. This used to join immediately (and leave the
+     * current group), so anyone able to write to the invites mailbox could drag a user into a
+     * group they control and read their messages. Nothing changes until the user taps Join
+     * ([acceptPendingInvite]).
+     */
     fun receiveOnlineGroupInvite(groupId: String) {
         scope.launch {
             try {
                 if (DataGraph.repository.isGroupMember(groupId, nodeId.value)) return@launch
-                // One group at a time: an invite to a new group leaves the old one.
+                if (_pendingInvite.value?.groupId == groupId) return@launch
+                OnlineService.syncGroup(groupId, onLoaded = { name, _, _, createdBy ->
+                    scope.launch {
+                        val inviterName =
+                            if (createdBy.isNotEmpty()) NodeIdentity.displayName(createdBy) else "Someone"
+                        _pendingInvite.value = GroupInvite(
+                            groupId = groupId,
+                            groupName = name,
+                            inviterNode = createdBy,
+                            inviterName = inviterName,
+                        )
+                    }
+                })
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** Join the group from [pendingInvite] after the user confirmed. */
+    fun acceptPendingInvite() {
+        val invite = _pendingInvite.value ?: return
+        _pendingInvite.value = null
+        scope.launch {
+            try {
+                if (DataGraph.repository.isGroupMember(invite.groupId, nodeId.value)) return@launch
+                // One group at a time: joining a new group leaves the old one.
                 for (g in DataGraph.repository.allGroups()) {
-                    if (g.groupId == groupId) continue
+                    if (g.groupId == invite.groupId) continue
                     OnlineService.leaveGroupRemote(g.groupId)
                     DataGraph.repository.deleteGroup(g.groupId)
                 }
-                OnlineService.syncGroup(groupId, onLoaded = { name, memberIds, myKeyEnv, createdBy ->
+                OnlineService.syncGroup(invite.groupId, onLoaded = { name, memberIds, myKeyEnv, createdBy ->
                     scope.launch {
                         if (memberIds.contains(nodeId.value)) {
-                            DataGraph.repository.createGroup(groupId, name, groupId)
+                            DataGraph.repository.createGroup(invite.groupId, name, invite.groupId)
                             DataGraph.repository.addGroupMembers(
-                                groupId,
+                                invite.groupId,
                                 memberIds.map { n -> n to (if (n == nodeId.value) displayName.value else NodeIdentity.displayName(n)) }
                             )
                             val creatorPub = OnlineService.xPubFor(createdBy)
                             if (creatorPub != null && !myKeyEnv.isNullOrEmpty()) {
                                 val env = Base64.decode(myKeyEnv, Base64.NO_WRAP)
-                                val secret = CryptoEngine.unwrapGroupKey(creatorPub, groupId, env)
+                                val secret = CryptoEngine.unwrapGroupKey(creatorPub, invite.groupId, env)
                                 if (secret != null) {
-                                    DataGraph.repository.setGroupSecret(groupId, Base64.encodeToString(secret, Base64.NO_WRAP))
+                                    DataGraph.repository.setGroupSecret(invite.groupId, Base64.encodeToString(secret, Base64.NO_WRAP))
                                 }
                             }
                         }
@@ -640,8 +685,13 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
         }
     }
 
+    /** Dismiss the invite without joining. */
+    fun declinePendingInvite() {
+        _pendingInvite.value = null
+    }
+
     private fun buildBroadcastPackets(msgId: ByteArray, text: String): List<MeshPacket.Packet> {
-        val signed = CryptoEngine.signBroadcast(text.toByteArray(Charsets.UTF_8))
+        val signed = CryptoEngine.signBroadcast(nodeId.value, text.toByteArray(Charsets.UTF_8))
         return Fragmentation.split(signed, MeshPacket.FRAGMENT_PAYLOAD_SIZE).map {
             MeshPacket.Packet(
                 type = MeshPacket.TYPE_BROADCAST,
@@ -657,6 +707,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
     private suspend fun deliverDirect(toNodeId: String, msgId: ByteArray, text: String): Boolean {
         val peer = DataGraph.repository.peer(toNodeId) ?: return false
         val key = peer.x25519PubKey ?: return false
+        if (!CryptoEngine.isUsableX25519PublicKey(key)) return false
         val plaintext = JSONObject()
             .put("t", text)
             .put("ts", System.currentTimeMillis())
@@ -691,7 +742,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
             src = nodeId.value,
             dst = toNodeId,
             ttl = MeshPacket.DEFAULT_TTL,
-            payload = CryptoEngine.x25519PublicKey(),
+            payload = CryptoEngine.ownKeyBinding(),
         )
         deliverToNetwork(listOf(packet))
     }
@@ -876,7 +927,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
         relayIt(packet)
         val assembled = relay.addFragment(packet) ?: return
         scope.launch {
-            val text = CryptoEngine.verifyBroadcast(assembled) ?: return@launch
+            val text = CryptoEngine.verifyBroadcast(packet.src, assembled) ?: return@launch
             DataGraph.repository.insertMessage(
                 MessageEntity(
                     msgId = msgIdHex,
@@ -895,10 +946,14 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
 
     private fun handleHandshake(packet: MeshPacket.Packet, channel: PacketChannel) {
         scope.launch {
-            if (packet.payload.size == 32) {
+            // Only accept the peer's key if it comes with a binding proving it belongs to the
+            // packet's claimed node id - a bare key would let anyone advertise a node id that
+            // is not theirs.
+            val boundKey = CryptoEngine.extractBoundX25519Pub(packet.src, packet.payload)
+            if (boundKey != null) {
                 val existing = DataGraph.repository.peer(packet.src)?.x25519PubKey
-                if (existing == null || existing.contentEquals(packet.payload)) {
-                    DataGraph.repository.setPeerKey(packet.src, packet.payload)
+                if (CryptoEngine.shouldAdoptPeerKey(existing, boundKey)) {
+                    DataGraph.repository.setPeerKey(packet.src, boundKey)
                 }
             }
             val reply = MeshPacket.Packet(
@@ -907,7 +962,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
                 src = nodeId.value,
                 dst = packet.src,
                 ttl = MeshPacket.DEFAULT_TTL,
-                payload = CryptoEngine.x25519PublicKey(),
+                payload = CryptoEngine.ownKeyBinding(),
             )
             channel.send(MeshPacket.encode(reply))
             flushPendingFor(packet.src)
@@ -921,7 +976,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
         scope.launch {
             if (!DataGraph.repository.isGroupMember(packet.dst, nodeId.value)) return@launch
             val assembled = relay.addFragment(packet) ?: return@launch
-            val ciphertext = CryptoEngine.verifyBroadcast(assembled) ?: return@launch
+            val ciphertext = CryptoEngine.verifyBroadcast(packet.src, assembled) ?: return@launch
             val secretRaw = DataGraph.repository.groupSecret(packet.dst) ?: return@launch
             val key = Base64.decode(secretRaw, Base64.NO_WRAP)
             val plaintext = CryptoEngine.decryptGroupMessage(key, packet.msgId, ciphertext) ?: return@launch
@@ -948,7 +1003,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
         relayIt(packet)
         scope.launch {
             try {
-                val json = JSONObject(String(packet.payload, Charsets.UTF_8))
+                val json = GroupControl.parse(packet.src, packet.payload) ?: return@launch
                 val groupId = json.getString("g")
                 val name = json.getString("n")
                 val members = json.optJSONArray("m") ?: return@launch
@@ -982,7 +1037,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
     private fun handleGroupDelete(packet: MeshPacket.Packet) {
         scope.launch {
             try {
-                val json = JSONObject(String(packet.payload, Charsets.UTF_8))
+                val json = GroupControl.parse(packet.src, packet.payload) ?: return@launch
                 val groupId = json.getString("g")
                 val group = DataGraph.repository.group(groupId) ?: return@launch
                 if (group.createdByNodeId != packet.src) return@launch
@@ -995,7 +1050,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
     private fun handleGroupKick(packet: MeshPacket.Packet) {
         scope.launch {
             try {
-                val json = JSONObject(String(packet.payload, Charsets.UTF_8))
+                val json = GroupControl.parse(packet.src, packet.payload) ?: return@launch
                 val groupId = json.getString("g")
                 val member = json.getString("m")
                 val group = DataGraph.repository.group(groupId) ?: return@launch
@@ -1109,7 +1164,7 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
                 if (secretRaw != null) {
                     val key = Base64.decode(secretRaw, Base64.NO_WRAP)
                     val ciphertext = CryptoEngine.encryptGroupMessage(key, message.msgId.hexToBytes(), message.text.toByteArray(Charsets.UTF_8))
-                    val signed = CryptoEngine.signBroadcast(ciphertext)
+                    val signed = CryptoEngine.signBroadcast(nodeId.value, ciphertext)
                     val packets = buildGroupPackets(signed, message.msgId.hexToBytes(), message.conversationId)
                     if (deliverToNetwork(packets)) {
                         DataGraph.repository.setStatus(message.msgId, STATUS_SENT)

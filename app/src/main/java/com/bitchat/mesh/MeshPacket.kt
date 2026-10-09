@@ -47,7 +47,7 @@ object MeshPacket {
         out[i++] = MAGIC_1
         out[i++] = VERSION
         out[i++] = packet.type.toByte()
-        out[i++] = packet.ttl.toByte()
+        out[i++] = packet.ttl.coerceIn(0, DEFAULT_TTL).toByte()
         packet.msgId.copyInto(out, i)
         i += 16
         srcBytes.copyInto(out, i)
@@ -72,7 +72,9 @@ object MeshPacket {
             msgId = bytes.copyOfRange(5, 21),
             src = bytes.copyOfRange(21, 37).toHex(),
             dst = bytes.copyOfRange(37, 53).toHex(),
-            ttl = bytes[4].toInt() and 0xFF,
+            // TTL arrives in a full byte from an untrusted peer. Left unclamped, a value of
+            // 255 lets a single packet be relayed far past the intended hop budget.
+            ttl = (bytes[4].toInt() and 0xFF).coerceIn(0, DEFAULT_TTL),
             payload = bytes.copyOfRange(HEADER_SIZE, bytes.size),
         )
     }

@@ -2,7 +2,6 @@ package com.bitchat.crypto
 
 import android.content.Context
 import android.util.Base64
-import java.security.MessageDigest
 import java.security.SecureRandom
 
 /**
@@ -151,12 +150,8 @@ object Recovery {
         return out
     }
 
-    /** nodeId = first 16 bytes of SHA-256(seed): deterministic mesh address. */
-    fun deriveNodeId(seed: ByteArray): String =
-        MessageDigest.getInstance("SHA-256")
-            .digest(seed)
-            .copyOfRange(0, 16)
-            .joinToString("") { "%02x".format(it) }
+    /** nodeId = first 16 bytes of SHA-256(ed25519 public key derived from the seed). */
+    fun deriveNodeId(seed: ByteArray): String = CryptoEngine.nodeIdFromSeed(seed)
 
     // ------------------------------------------------------------------
     // Restore

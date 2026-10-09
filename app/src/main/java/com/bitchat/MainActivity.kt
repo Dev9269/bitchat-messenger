@@ -21,13 +21,16 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bitchat.crypto.Recovery
+import com.bitchat.startup.StartupGate
 import com.bitchat.mesh.MeshManager
 import com.bitchat.mesh.MeshService
 import com.bitchat.mesh.PermissionRequirements
 import com.bitchat.ui.account.AccountGate
 import com.bitchat.ui.chat.ChatScreen
+import com.bitchat.ui.data.DatabaseBlockedScreen
 import com.bitchat.ui.discovery.DiscoveryScreen
 import com.bitchat.ui.discovery.DiscoveryViewModel
+import com.bitchat.ui.groups.GroupInviteDialog
 import com.bitchat.ui.groups.GroupsScreen
 import com.bitchat.ui.home.HomeScreen
 import com.bitchat.ui.home.HomeViewModel
@@ -81,6 +84,13 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun AppContent() {
+        val dbFailure = StartupGate.blockedReason
+        if (dbFailure != null) {
+            // Every screen below reads through DataGraph.repository and the account keys,
+            // both unusable when startup was blocked. Say so instead of crashing on access.
+            DatabaseBlockedScreen(message = dbFailure)
+            return
+        }
         var screen by remember { mutableStateOf<Screen>(Screen.Home) }
         var showLockDialog by remember { mutableStateOf(false) }
         var showAccountGate by remember {
@@ -170,6 +180,15 @@ class MainActivity : ComponentActivity() {
         if (showLockDialog) {
             LockDialog(onDismiss = { showLockDialog = false })
         }
+
+        val pendingInvite by MeshManager.pendingInvite.collectAsStateWithLifecycle()
+        if (pendingInvite != null) {
+            GroupInviteDialog(
+                invite = pendingInvite!!,
+                onJoin = { MeshManager.acceptPendingInvite() },
+                onDecline = { MeshManager.declinePendingInvite() },
+            )
+        }
     }
 
     override fun onStop() {
@@ -211,6 +230,7 @@ class MainActivity : ComponentActivity() {
 
     private fun maybeAutoStartMesh() {
         if (meshAutoStarted) return
+        if (StartupGate.blockedReason != null) return
         if (!PermissionRequirements.allGranted(this)) return
         if (!MeshManager.bluetoothEnabled.value) return
         meshAutoStarted = true

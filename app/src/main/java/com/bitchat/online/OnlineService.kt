@@ -162,12 +162,12 @@ object OnlineService {
                 }
             }
 
-            val xPubB64 = Base64.encodeToString(CryptoEngine.x25519PublicKey(), Base64.NO_WRAP)
+            val bindingB64 = Base64.encodeToString(CryptoEngine.ownKeyBinding(), Base64.NO_WRAP)
             val profileData = mapOf(
                 "username" to myUsername,
                 "node_id" to myNode,
                 "display_name" to MeshManager.displayName.value,
-                "x_pub" to xPubB64,
+                "binding" to bindingB64,
                 "uid" to myUid,
                 "created_at" to System.currentTimeMillis()
             )
@@ -362,9 +362,12 @@ object OnlineService {
         val db = firestore ?: return local
         return try {
             val doc = db.collection("nodes").document(nodeId).get().await()
-            val b64 = doc.getString("x_pub") ?: return local
-            val pub = Base64.decode(b64, Base64.NO_WRAP)
-            if (local != null && !local.contentEquals(pub)) {
+            // The document's key is only trusted if it carries a binding proving it belongs
+            // to that node id; a bare x_pub could be written by anyone for anyone.
+            val b64 = doc.getString("binding") ?: return local
+            val pub = CryptoEngine.extractBoundX25519Pub(nodeId, Base64.decode(b64, Base64.NO_WRAP))
+                ?: return local
+            if (!CryptoEngine.shouldAdoptPeerKey(local, pub)) {
                 local
             } else {
                 if (local == null) DataGraph.repository.setPeerKey(nodeId, pub)
@@ -579,8 +582,19 @@ object OnlineService {
         val db = firestore ?: return false
         return try {
             val doc = db.collection("settings").document("access").get().await()
-            val hash = doc.getString("personal_secret") ?: return false
-            val ok = AccessControl.constantTimeEquals(AccessControl.sha256Hex(secret), hash)
+            val saltB64 = doc.getString("personal_secret_salt") ?: return false
+            val hashB64 = doc.getString("personal_secret") ?: return false
+            val stored = try {
+                Base64.decode(hashB64, Base64.NO_WRAP)
+            } catch (_: Exception) {
+                return false
+            }
+            val salt = try {
+                Base64.decode(saltB64, Base64.NO_WRAP)
+            } catch (_: Exception) {
+                return false
+            }
+            val ok = AccessControl.constantTimeEquals(AccessControl.deriveSecretKey(secret, salt), stored)
             if (ok) AccessControl.setDmUnlocked(true)
             ok
         } catch (_: Exception) {
@@ -614,8 +628,16 @@ object OnlineService {
         val myUid = auth?.currentUser?.uid ?: return
         try {
             val data = mutableMapOf<String, Any>("owner" to myUid)
-            if (secret != null) data["personal_secret"] = AccessControl.sha256Hex(secret)
-            else data["personal_secret"] = FieldValue.delete()
+            if (secret != null) {
+                // Salted PBKDF2 verifier: settings/access is readable by any session, so a
+                // bare hash would be crackable offline.
+                val salt = AccessControl.newSecretSalt()
+                data["personal_secret"] = Base64.encodeToString(AccessControl.deriveSecretKey(secret, salt), Base64.NO_WRAP)
+                data["personal_secret_salt"] = Base64.encodeToString(salt, Base64.NO_WRAP)
+            } else {
+                data["personal_secret"] = FieldValue.delete()
+                data["personal_secret_salt"] = FieldValue.delete()
+            }
             if (allowlist != null) data["allowlist"] = allowlist
             db.collection("settings").document("access").set(data, SetOptions.merge()).await()
         } catch (_: Exception) {

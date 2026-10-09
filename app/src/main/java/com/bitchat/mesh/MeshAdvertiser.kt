@@ -37,6 +37,7 @@ class MeshAdvertiser(context: Context) {
             .build()
         val data = AdvertiseData.Builder()
             .setIncludeDeviceName(false)
+            .setIncludeTxPowerLevel(MeshConstants.INCLUDE_TX_POWER_LEVEL)
             .addServiceData(
                 ParcelUuid(MeshConstants.DISCOVERY_UUID),
                 AdvertisePayload.encode(nodeId, name)

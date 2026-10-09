@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.bitchat.MainActivity
 import com.bitchat.R
+import com.bitchat.startup.StartupGate
 
 class MeshService : Service() {
 
@@ -24,6 +25,13 @@ class MeshService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (StartupGate.blockedReason != null) {
+            // The mesh writes every seen packet to the database and signs with the account
+            // keys. With either unavailable it cannot run, and START_STICKY would otherwise
+            // restart this service into a crash loop.
             stopSelf()
             return START_NOT_STICKY
         }

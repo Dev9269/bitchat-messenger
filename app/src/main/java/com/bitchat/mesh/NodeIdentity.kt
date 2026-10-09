@@ -1,8 +1,7 @@
 package com.bitchat.mesh
 
 import android.content.Context
-import com.bitchat.crypto.Recovery
-import java.security.SecureRandom
+import com.bitchat.crypto.CryptoEngine
 
 object NodeIdentity {
 
@@ -10,22 +9,21 @@ object NodeIdentity {
     private const val KEY_NODE_ID = "node_id"
     private const val KEY_DISPLAY_NAME = "display_name"
 
+    /**
+     * The node id is derived from the ed25519 public key (see CryptoEngine.nodeId), so it is
+     * recomputed each time rather than trusted from storage. A stale cached id from an older
+     * scheme is overwritten.
+     */
     fun getNodeId(context: Context): String {
+        val id = CryptoEngine.nodeId()
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.getString(KEY_NODE_ID, null)?.let { return it }
-        val seed = Recovery.getSeed(context)
-        val id = if (seed != null) {
-            Recovery.deriveNodeId(seed)
-        } else {
-            val bytes = ByteArray(MeshConstants.NODE_ID_LENGTH)
-            SecureRandom().nextBytes(bytes)
-            bytes.toHex()
+        if (prefs.getString(KEY_NODE_ID, null) != id) {
+            prefs.edit().putString(KEY_NODE_ID, id).apply()
         }
-        prefs.edit().putString(KEY_NODE_ID, id).apply()
         return id
     }
 
-    /** Drop the cached id so [getNodeId] re-derives it from the recovery seed. */
+    /** Drop the cached id; [getNodeId] recomputes it from the current keys. */
     fun clearNodeId(context: Context) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
