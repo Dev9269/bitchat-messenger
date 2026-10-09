@@ -31,6 +31,17 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 
+/**
+ * A group invite that arrived over the online mailbox and is waiting for the user to accept or
+ * decline. Nothing is joined until [MeshManager.acceptPendingInvite] runs.
+ */
+data class GroupInvite(
+    val groupId: String,
+    val groupName: String,
+    val inviterNode: String,
+    val inviterName: String,
+)
+
 @SuppressLint("StaticFieldLeak")
 object MeshManager {
 
@@ -73,6 +84,9 @@ object MeshManager {
 
     private val _links = MutableStateFlow<Map<String, MeshLink.State>>(emptyMap())
     val linkStates: StateFlow<Map<String, MeshLink.State>> = _links.asStateFlow()
+
+    private val _pendingInvite = MutableStateFlow<GroupInvite?>(null)
+    val pendingInvite: StateFlow<GroupInvite?> = _pendingInvite.asStateFlow()
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -606,30 +620,61 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
         }
     }
 
+    /**
+     * Stage an invite for the user to confirm. This used to join immediately (and leave the
+     * current group), so anyone able to write to the invites mailbox could drag a user into a
+     * group they control and read their messages. Nothing changes until the user taps Join
+     * ([acceptPendingInvite]).
+     */
     fun receiveOnlineGroupInvite(groupId: String) {
         scope.launch {
             try {
                 if (DataGraph.repository.isGroupMember(groupId, nodeId.value)) return@launch
-                // One group at a time: an invite to a new group leaves the old one.
+                if (_pendingInvite.value?.groupId == groupId) return@launch
+                OnlineService.syncGroup(groupId, onLoaded = { name, _, _, createdBy ->
+                    scope.launch {
+                        val inviterName =
+                            if (createdBy.isNotEmpty()) NodeIdentity.displayName(createdBy) else "Someone"
+                        _pendingInvite.value = GroupInvite(
+                            groupId = groupId,
+                            groupName = name,
+                            inviterNode = createdBy,
+                            inviterName = inviterName,
+                        )
+                    }
+                })
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /** Join the group from [pendingInvite] after the user confirmed. */
+    fun acceptPendingInvite() {
+        val invite = _pendingInvite.value ?: return
+        _pendingInvite.value = null
+        scope.launch {
+            try {
+                if (DataGraph.repository.isGroupMember(invite.groupId, nodeId.value)) return@launch
+                // One group at a time: joining a new group leaves the old one.
                 for (g in DataGraph.repository.allGroups()) {
-                    if (g.groupId == groupId) continue
+                    if (g.groupId == invite.groupId) continue
                     OnlineService.leaveGroupRemote(g.groupId)
                     DataGraph.repository.deleteGroup(g.groupId)
                 }
-                OnlineService.syncGroup(groupId, onLoaded = { name, memberIds, myKeyEnv, createdBy ->
+                OnlineService.syncGroup(invite.groupId, onLoaded = { name, memberIds, myKeyEnv, createdBy ->
                     scope.launch {
                         if (memberIds.contains(nodeId.value)) {
-                            DataGraph.repository.createGroup(groupId, name, groupId)
+                            DataGraph.repository.createGroup(invite.groupId, name, invite.groupId)
                             DataGraph.repository.addGroupMembers(
-                                groupId,
+                                invite.groupId,
                                 memberIds.map { n -> n to (if (n == nodeId.value) displayName.value else NodeIdentity.displayName(n)) }
                             )
                             val creatorPub = OnlineService.xPubFor(createdBy)
                             if (creatorPub != null && !myKeyEnv.isNullOrEmpty()) {
                                 val env = Base64.decode(myKeyEnv, Base64.NO_WRAP)
-                                val secret = CryptoEngine.unwrapGroupKey(creatorPub, groupId, env)
+                                val secret = CryptoEngine.unwrapGroupKey(creatorPub, invite.groupId, env)
                                 if (secret != null) {
-                                    DataGraph.repository.setGroupSecret(groupId, Base64.encodeToString(secret, Base64.NO_WRAP))
+                                    DataGraph.repository.setGroupSecret(invite.groupId, Base64.encodeToString(secret, Base64.NO_WRAP))
                                 }
                             }
                         }
@@ -638,6 +683,11 @@ fun joinGroupByCode(code: String, secret: String? = null, onResult: (Boolean, St
             } catch (_: Exception) {
             }
         }
+    }
+
+    /** Dismiss the invite without joining. */
+    fun declinePendingInvite() {
+        _pendingInvite.value = null
     }
 
     private fun buildBroadcastPackets(msgId: ByteArray, text: String): List<MeshPacket.Packet> {

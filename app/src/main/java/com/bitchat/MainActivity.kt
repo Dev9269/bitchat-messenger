@@ -30,6 +30,7 @@ import com.bitchat.ui.chat.ChatScreen
 import com.bitchat.ui.data.DatabaseBlockedScreen
 import com.bitchat.ui.discovery.DiscoveryScreen
 import com.bitchat.ui.discovery.DiscoveryViewModel
+import com.bitchat.ui.groups.GroupInviteDialog
 import com.bitchat.ui.groups.GroupsScreen
 import com.bitchat.ui.home.HomeScreen
 import com.bitchat.ui.home.HomeViewModel
@@ -178,6 +179,15 @@ class MainActivity : ComponentActivity() {
 
         if (showLockDialog) {
             LockDialog(onDismiss = { showLockDialog = false })
+        }
+
+        val pendingInvite by MeshManager.pendingInvite.collectAsStateWithLifecycle()
+        if (pendingInvite != null) {
+            GroupInviteDialog(
+                invite = pendingInvite!!,
+                onJoin = { MeshManager.acceptPendingInvite() },
+                onDecline = { MeshManager.declinePendingInvite() },
+            )
         }
     }
 
